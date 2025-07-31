@@ -1,0 +1,21 @@
+name: DevDamageHandler
+version: '1.0'
+main: com.Teenkung.devDamageHandler.DevDamageHandler
+api-version: '1.21'
+prefix: PluginManager
+authors: [ Teenkung123 ]
+depend: [MythicLib, MythicMobs, MMOItems]
+
+commands:
+  ddh:
+    description: DevDamageHandler admin command
+    usage: /ddh
+    permission: devdamagehandler.use
+
+permissions:
+  devdamagehandler.use:
+    default: op
+  devdamagehandler.debug:
+    default: op
+  devdamagehandler.reload:
+    default: op

@@ -1,0 +1,424 @@
+id: 'mage-arcane-mage'
+name: '&4Mage'
+type: CUSTOM
+item: 'DIAMOND_AXE'
+lore:
+  - '&6Available to Mages only'
+max-point-spent: 21
+
+nodes:
+
+  #### A
+  a1:
+    name: 'Mana Regen I'
+    coordinates:
+      x: 1
+      y: -2
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MANA_REGENERATION";amount=1;type="FLAT"}'
+    lores:
+      0:
+        - "&eMana regen in pts/sec +1"
+      1:
+        - "&eMana regen in pts/sec +1"
+  a2:
+    name: 'Mana Regen II'
+    coordinates:
+      x: 0
+      y: -2
+
+    parents:
+      strong:
+        a1: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MANA_REGENERATION";amount=2;type="FLAT"}'
+    lores:
+      0:
+        - "&eMana regen in pts/sec +2"
+      1:
+        - "&eMana regen in pts/sec +2"
+  a3:
+    name: 'Mana Regen III'
+    coordinates:
+      x: -1
+      y: -2
+
+    parents:
+      strong:
+        a2: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MANA_REGENERATION";amount=2;type="FLAT"}'
+    lores:
+      0:
+        - "&eMana regen in pts/sec +2"
+      1:
+        - "&eMana regen in pts/sec +2"
+
+  ## B
+
+  b1:
+    name: 'Offense I'
+    coordinates:
+      x: -2
+      y: -1
+
+    parents:
+      strong:
+        a3: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SKILL_DAMAGE";amount=5;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional ability damage in +%5"
+      1:
+        - "&eAdditional ability damage in +%5"
+  b2:
+    name: 'Offense II'
+    coordinates:
+      x: -3
+      y: 0
+
+    parents:
+      strong:
+        b1: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SKILL_DAMAGE";amount=5;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional ability damage in +%5"
+      1:
+        - "&eAdditional ability damage in +%5"
+  b3:
+    name: 'Offense III'
+    coordinates:
+      x: -2
+      y: 1
+
+    parents:
+      strong:
+        b2: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SKILL_DAMAGE";amount=10;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional ability damage in +%10"
+      1:
+        - "&eAdditional ability damage in +%10"
+
+  ## C
+
+  c1:
+    name: 'Spell Vamp I'
+    coordinates:
+      x: -2
+      y: 2
+
+    parents:
+      strong:
+        b3: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SPELL_VAMPIRISM";amount=2;type="FLAT"}'
+    lores:
+      0:
+        - "&ePercentage of damage you gain back as health when inflicting skill damage +%2"
+      1:
+        - "&ePercentage of damage you gain back as health when inflicting skill damage +%2"
+  c2:
+    name: 'Spell Vamp II'
+    coordinates:
+      x: -1
+      y: 2
+
+    parents:
+      strong:
+        c1: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SPELL_VAMPIRISM";amount=2;type="FLAT"}'
+    lores:
+      0:
+        - "&ePercentage of damage you gain back as health when inflicting skill damage +%2"
+      1:
+        - "&ePercentage of damage you gain back as health when inflicting skill damage +%2"
+  c3:
+    name: 'Spell Vamp III'
+    coordinates:
+      x: 0
+      y: 2
+
+    parents:
+      strong:
+        c2: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SPELL_VAMPIRISM";amount=6;type="FLAT"}'
+    lores:
+      0:
+        - "&ePercentage of damage you gain back as health when inflicting skill damage +%6"
+      1:
+        - "&ePercentage of damage you gain back as health when inflicting skill damage +%6"
+
+  ## D
+
+  d1:
+    name: 'Additional Exp I'
+    coordinates:
+      x: 0
+      y: 1
+
+    parents:
+      strong:
+        c3: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="ADDITIONAL_EXPERIENCE";amount=2;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional MMOCore main class experience +%2"
+      1:
+        - "&eAdditional MMOCore main class experience +%2"
+  d2:
+    name: 'Additional Exp II'
+    coordinates:
+      x: 0
+      y: 0
+
+    parents:
+      strong:
+        d1: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="ADDITIONAL_EXPERIENCE";amount=3;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional MMOCore main class experience +%3"
+      1:
+        - "&eAdditional MMOCore main class experience +%3"
+  d3:
+    name: 'Additional Exp III'
+    coordinates:
+      x: 1
+      y: 0
+
+    parents:
+      strong:
+        d2: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="ADDITIONAL_EXPERIENCE";amount=5;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional MMOCore main class experience +%5"
+      1:
+        - "&eAdditional MMOCore main class experience +%5"
+
+  ## E
+
+  e1:
+    name: 'Magic Resistance I'
+    coordinates:
+      x: 2
+      y: 0
+
+    parents:
+      strong:
+        d3: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE_REDUCTION";amount=5;type="FLAT"}'
+    lores:
+      0:
+        - "&eReduce magic damage dealt by potions %5"
+      1:
+        - "&eReduce magic damage dealt by potions %5"
+  e2:
+    name: 'Magic Resistance II'
+    coordinates:
+      x: 2
+      y: 1
+
+    parents:
+      strong:
+        e1: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE_REDUCTION";amount=5;type="FLAT"}'
+    lores:
+      0:
+        - "&eReduce magic damage dealt by potions %5"
+      1:
+        - "&eReduce magic damage dealt by potions %5"
+  e3:
+    name: 'Magic Resistance III'
+    coordinates:
+      x: 2
+      y: 2
+
+    parents:
+      strong:
+        e2: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE_REDUCTION";amount=10;type="FLAT"}'
+    lores:
+      0:
+        - "&eReduce magic damage dealt by potions %10"
+      1:
+        - "&eReduce magic damage dealt by potions %10"
+
+  ## F
+
+  f1:
+    name: 'Skill Crit Chance I'
+    coordinates:
+      x: 3
+      y: 2
+
+    parents:
+      strong:
+        e3: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SKILL_CRITICAL_STRIKE_CHANCE";amount=5;type="FLAT"}'
+    lores:
+      0:
+        - "&eIncreases the chance of dealing skill crits +%5"
+      1:
+        - "&eIncreases the chance of dealing skill crits +%5"
+  f2:
+    name: 'Skill Crit Chance II'
+    coordinates:
+      x: 4
+      y: 2
+
+    parents:
+      strong:
+        f1: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SKILL_CRITICAL_STRIKE_CHANCE";amount=10;type="FLAT"}'
+    lores:
+      0:
+        - "&eIncreases the chance of dealing skill crits +%10"
+      1:
+        - "&eIncreases the chance of dealing skill crits +%10"
+  f3:
+    name: 'Skill Crit Chance III'
+    coordinates:
+      x: 4
+      y: 1
+
+    parents:
+      strong:
+        f2: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="SKILL_CRITICAL_STRIKE_CHANCE";amount=15;type="FLAT"}'
+    lores:
+      0:
+        - "&eIncreases the chance of dealing skill crits +%15"
+      1:
+        - "&eIncreases the chance of dealing skill crits +%15"
+
+  ## G
+
+  g1:
+    name: 'Skills IV'
+    coordinates:
+      x: 4
+      y: 0
+
+    parents:
+      strong:
+        f3: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE";amount=1;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional magic skill damage in +%1"
+      1:
+        - "&eAdditional magic skill damage in +%1"
+  g2:
+    name: 'Skills V'
+    coordinates:
+      x: 4
+      y: -1
+
+    parents:
+      strong:
+        g1: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE";amount=2;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional magic skill damage in +%2"
+      1:
+        - "&eAdditional magic skill damage in +%2"
+  g3:
+    name: 'Skills VI'
+    coordinates:
+      x: 4
+      y: -2
+
+    parents:
+      strong:
+        g2: 1
+
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE";amount=2;type="FLAT"}'
+    lores:
+      0:
+        - "&eAdditional magic skill damage in +%2"
+      1:
+        - "&eAdditional magic skill damage in +%2"

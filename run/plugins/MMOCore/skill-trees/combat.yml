@@ -1,0 +1,540 @@
+id: 'combat'
+name: '&4Combat'
+lore:
+  - '&6This skill tree is used for combat abilities!'
+type: PROXIMITY
+item: DIAMOND_AXE
+max-point-spent: 20
+nodes:
+  a1:
+    name: 'Cooldown Reduction I'
+    coordinates:
+      x: -3
+      y: -2
+
+    root: true
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="COOLDOWN_REDUCTION";amount=5;type="FLAT"}'
+    lores:
+      0:
+        - "&eReduces item/class skill cooldowns (5%)"
+      1:
+        - "&eReduces item/class skill cooldowns (5%)"
+
+  a2:
+    name: 'Cooldown Reduction II'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="COOLDOWN_REDUCTION";amount=10;type="FLAT"}'
+    coordinates:
+      x: -2
+      y: -2
+    lores:
+      0:
+        - "&eReduces item/class skill cooldowns (10%)"
+      1:
+        - "&eReduces item/class skill cooldowns (20%)"
+
+  a3:
+    name: 'Cooldown Reduction III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="COOLDOWN_REDUCTION";amount=15;type="FLAT"}'
+    coordinates:
+      x: -1
+      y: -2
+    lores:
+      0:
+        - "&eReduces item/class skill cooldowns (15%)"
+      1:
+        - "&eReduces item/class skill cooldowns (30%)"
+
+  ### B
+
+  b1:
+    name: 'Crit Chance I'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="CRITICAL_STRIKE_CHANCE";amount=1;type="FLAT"}'
+    coordinates:
+      x: 0
+      y: -2
+    lores:
+      0:
+        - "&eCritical Strikes deal more damage in % chance"
+      1:
+        - "&eCritical Strikes deal more damage in +%1 chance"
+
+  b2:
+    name: 'Crit Chance II'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="CRITICAL_STRIKE_CHANCE";amount=2;type="FLAT"}'
+    coordinates:
+      x: 0
+      y: -1
+    lores:
+      0:
+        - "&eCritical Strikes deal more damage in % chance"
+      1:
+        - "&eCritical Strikes deal more damage in +%3 chance"
+
+  b3:
+    name: 'Crit Chance III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="CRITICAL_STRIKE_CHANCE";amount=3;type="FLAT"}'
+    coordinates:
+      x: 0
+      y: 0
+    lores:
+      0:
+        - "&eCritical Strikes deal more damage in % chance"
+      1:
+        - "&eCritical Strikes deal more damage in +%5 chance"
+
+  ## C
+
+  c1:
+    name: 'Life Steal I'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="LIFESTEAL";amount=1;type="FLAT"}'
+    coordinates:
+      x: -1
+      y: 0
+    lores:
+      0:
+        - "&ePercentage of damage you gain back as health when inflicting weapon damage +%1"
+      1:
+        - "&ePercentage of damage you gain back as health when inflicting weapon damage +%1"
+
+  c2:
+    name: 'Life Steal II'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="LIFESTEAL";amount=2;type="FLAT"}'
+    coordinates:
+      x: -2
+      y: 0
+    lores:
+      0:
+        - "&ePercentage of damage you gain back as health when inflicting weapon damage +%2"
+      1:
+        - "&ePercentage of damage you gain back as health when inflicting weapon damage +%2"
+
+  c3:
+    name: 'Life Steal III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="LIFESTEAL";amount=3;type="FLAT"}'
+    coordinates:
+      x: -3
+      y: 0
+    lores:
+      0:
+        - "&ePercentage of damage you gain back as health when inflicting weapon damage +%3"
+      1:
+        - "&ePercentage of damage you gain back as health when inflicting weapon damage +%3"
+
+  ## D
+
+  d1:
+    name: 'Resistance I'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="DAMAGE_REDUCTION";amount=1;type="FLAT"}'
+    coordinates:
+      x: 0
+      y: 1
+    lores:
+      0:
+        - "&eReduces damage from any source in +%1"
+      1:
+        - "&eReduces damage from any source in +%1"
+
+  d2:
+    name: 'Resistance II'
+    max-children: 2
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="DAMAGE_REDUCTION";amount=2;type="FLAT"}'
+    coordinates:
+      x: 0
+      y: 2
+    lores:
+      0:
+        - "&eReduces damage from any source in +%2"
+      1:
+        - "&eReduces damage from any source in +%2"
+
+  d3:
+    name: 'Resistance III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="DAMAGE_REDUCTION";amount=2;type="FLAT"}'
+    coordinates:
+      x: -1
+      y: 2
+    lores:
+      0:
+        - "&eReduces damage from any source in +%2"
+      1:
+        - "&eReduces damage from any source in +%2"
+
+  ## E
+
+  e1:
+    name: 'Health Regen I'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="HEALTH_REGENERATION";amount=1;type="FLAT"}'
+    coordinates:
+      x: -2
+      y: 2
+    lores:
+      0:
+        - "&eHealth regen in pts/sec +1"
+      1:
+        - "&eHealth regen in pts/sec +1"
+
+  e2:
+    name: 'Health Regen II'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="HEALTH_REGENERATION";amount=2;type="FLAT"}'
+    coordinates:
+      x: -3
+      y: 2
+    lores:
+      0:
+        - "&eHealth regen in pts/sec +2"
+      1:
+        - "&eHealth regen in pts/sec +2"
+
+  e3:
+    name: 'Health Regen III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="HEALTH_REGENERATION";amount=2;type="FLAT"}'
+    coordinates:
+      x: -3
+      y: 1
+    lores:
+      0:
+        - "&eHealth regen in pts/sec +2"
+      1:
+        - "&eHealth regen in pts/sec +2"
+
+  ## F
+
+  f1:
+    name: 'Mana Regen I'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MANA_REGENERATION";amount=1;type="FLAT"}'
+    coordinates:
+      x: 1
+      y: 2
+    lores:
+      0:
+        - "&eMana regen in pts/sec +1"
+      1:
+        - "&eMana regen in pts/sec +1"
+
+  f2:
+    name: 'Mana Regen II'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MANA_REGENERATION";amount=2;type="FLAT"}'
+    coordinates:
+      x: 2
+      y: 2
+    lores:
+      0:
+        - "&eMana regen in pts/sec +2"
+      1:
+        - "&eMana regen in pts/sec +2"
+
+  f3:
+    name: 'Mana Regen III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MANA_REGENERATION";amount=2;type="FLAT"}'
+    coordinates:
+      x: 3
+      y: 2
+    lores:
+      0:
+        - "&eMana regen in pts/sec +2"
+      1:
+        - "&eMana regen in pts/sec +2"
+
+  ## G
+
+  g1:
+    name: 'Magic Damage I'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE";amount=1;type="FLAT"}'
+    coordinates:
+      x: 3
+      y: 1
+    lores:
+      0:
+        - "&eAdditional magic skill damage in +%1"
+      1:
+        - "&eAdditional magic skill damage in +%1"
+
+  g2:
+    name: 'Magic Damage II'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE";amount=2;type="FLAT"}'
+    coordinates:
+      x: 4
+      y: 1
+    lores:
+      0:
+        - "&eAdditional magic skill damage in +%2"
+      1:
+        - "&eAdditional magic skill damage in +%2"
+
+  g3:
+    name: 'Magic Damage III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAGIC_DAMAGE";amount=2;type="FLAT"}'
+    coordinates:
+      x: 4
+      y: 0
+    lores:
+      0:
+        - "&eAdditional magic skill damage in +%2"
+      1:
+        - "&eAdditional magic skill damage in +%2"
+
+  ## H
+
+  h1:
+    name: 'Max Health I'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAX_HEALTH";amount=2;type="RELATIVE"}'
+    coordinates:
+      x: 4
+      y: -1
+    lores:
+      0:
+        - "&eAdditional amount of health in +%2"
+      1:
+        - "&eAdditional amount of health in +%2"
+
+  h2:
+    name: 'Max Health II'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAX_HEALTH";amount=4;type="RELATIVE"}'
+    coordinates:
+      x: 4
+      y: -2
+    lores:
+      0:
+        - "&eAdditional amount of health in +%4"
+      1:
+        - "&eAdditional amount of health in +%4"
+
+  h3:
+    name: 'Max Health III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="MAX_HEALTH";amount=4;type="RELATIVE"}'
+    coordinates:
+      x: 3
+      y: -2
+    lores:
+      0:
+        - "&eAdditional amount of health in +%4"
+      1:
+        - "&eAdditional amount of health in +%4"
+
+  ## J
+
+  j1:
+    name: 'Weapon Damage I'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="WEAPON_DAMAGE";amount=2;type="FLAT"}'
+    coordinates:
+      x: 2
+      y: -2
+    lores:
+      0:
+        - "&eAdditional on-hit weapon damage in +%2."
+      1:
+        - "&eAdditional on-hit weapon damage in +%2."
+
+  j2:
+    name: 'Weapon Damage II'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="WEAPON_DAMAGE";amount=4;type="FLAT"}'
+    coordinates:
+      x: 2
+      y: -1
+    lores:
+      0:
+        - "&eAdditional on-hit weapon damage in +%4"
+      1:
+        - "&eAdditional on-hit weapon damage in +%4"
+
+  j3:
+    name: 'Weapon Damage III'
+    experience-table:
+      first_table_item:
+        triggers:
+          - 'stat{stat="WEAPON_DAMAGE";amount=4;type="FLAT"}'
+    coordinates:
+      x: 2
+      y: 0
+    lores:
+      0:
+        - "&eAdditional on-hit weapon damage in +%4"
+      1:
+        - "&eAdditional on-hit weapon damage in +%4"
+
+# This section is to have a specific display for the skill tree in the GUI.
+# It is optional as if you don't fill it the config in gui/skill-tree.yml will be used.
+# For each node it will first look if the node has a specific display, if not it will look if
+# the display is defined in this section. If not it will use the default display in gui/skill-tree.yml.
+#
+#display:
+#  paths:
+#    unlocked:
+#      up: 'WHITE_DYE:0'
+#      up-right: 'WHITE_DYE:0'
+#      up-left: 'WHITE_DYE:0'
+#      down-right: 'WHITE_DYE:0'
+#      down-left: 'WHITE_DYE:0'
+#      right: 'WHITE_DYE:0'
+#      default: 'WHITE_DYE:0'
+#    unlockable:
+#      up: 'BLUE_DYE:0'
+#      up-right: 'BLUE_DYE:0'
+#      up-left: 'BLUE_DYE:0'
+#      down-right: 'BLUE_DYE:0'
+#      down-left: 'BLUE_DYE:0'
+#      right: 'BLUE_DYE:0'
+#      default: 'BLUE_DYE:0'
+#    locked:
+#      up: 'GRAY_DYE:0'
+#      up-right: 'GRAY_DYE:0'
+#      up-left: 'GRAY_DYE:0'
+#      down-right: 'GRAY_DYE:0'
+#      down-left: 'GRAY_DYE:0'
+#      right: 'GRAY_DYE:0'
+#      default: 'GRAY_DYE:0'
+#    fully-locked:
+#      up: 'BLACK_DYE:0'
+#      up-right: 'BLACK_DYE:0'
+#      up-left: 'BLACK_DYE:0'
+#      down-right: 'BLACK_DYE:0'
+#      down-left: 'BLACK_DYE:0'
+#      right: 'BLACK_DYE:0'
+#      default: 'BLACK_DYE:0'
+#  nodes:
+#    unlocked:
+#      up-right-down-left: 'WHITE_CONCRETE:0'
+#      up-right-down: 'WHITE_CONCRETE:0'
+#      up-right-left: 'WHITE_CONCRETE:0'
+#      up-down-left: 'WHITE_CONCRETE:0'
+#      down-right-left: 'WHITE_CONCRETE:0'
+#      up-right: 'WHITE_CONCRETE:0'
+#      up-down: 'WHITE_CONCRETE:0'
+#      up-left: 'WHITE_CONCRETE:0'
+#      down-right: 'WHITE_CONCRETE:0'
+#      down-left: 'WHITE_CONCRETE:0'
+#      right-left: 'WHITE_CONCRETE:0'
+#      right: 'WHITE_CONCRETE:0'
+#      left: 'WHITE_CONCRETE:0'
+#      up: 'WHITE_CONCRETE:0'
+#      down: 'WHITE_CONCRETE:0'
+#      no-path: 'WHITE_CONCRETE:0'
+#    locked:
+#      up-right-down-left: 'GRAY_CONCRETE:0'
+#      up-right-down: 'GRAY_CONCRETE:0'
+#      up-right-left: 'GRAY_CONCRETE:0'
+#      up-down-left: 'GRAY_CONCRETE:0'
+#      down-right-left: 'GRAY_CONCRETE:0'
+#      up-right: 'GRAY_CONCRETE:0'
+#      up-down: 'GRAY_CONCRETE:0'
+#      up-left: 'GRAY_CONCRETE:0'
+#      down-right: 'GRAY_CONCRETE:0'
+#      down-left: 'GRAY_CONCRETE:0'
+#      right-left: 'GRAY_CONCRETE:0'
+#      right: 'GRAY_CONCRETE:0'
+#      left: 'GRAY_CONCRETE:0'
+#      up: 'GRAY_CONCRETE:0'
+#      down: 'GRAY_CONCRETE:0'
+#      no-path: 'GRAY_CONCRETE:0'
+#    unlockable:
+#      up-right-down-left: 'BLUE_CONCRETE:0'
+#      up-right-down: 'BLUE_CONCRETE:0'
+#      up-right-left: 'BLUE_CONCRETE:0'
+#      up-down-left: 'BLUE_CONCRETE:0'
+#      down-right-left: 'BLUE_CONCRETE:0'
+#      up-right: 'BLUE_CONCRETE:0'
+#      up-down: 'BLUE_CONCRETE:0'
+#      up-left: 'BLUE_CONCRETE:0'
+#      down-right: 'BLUE_CONCRETE:0'
+#      down-left: 'BLUE_CONCRETE:0'
+#      right-left: 'BLUE_CONCRETE:0'
+#      right: 'BLUE_CONCRETE:0'
+#      left: 'BLUE_CONCRETE:0'
+#      up: 'BLUE_CONCRETE:0'
+#      down: 'BLUE_CONCRETE:0'
+#      no-path: 'BLUE_CONCRETE:0'
+#    fully-locked:
+#      up-right-down-left: 'BLACK_CONCRETE:0'
+#      up-right-down: 'BLACK_CONCRETE:0'
+#      up-right-left: 'BLACK_CONCRETE:0'
+#      up-down-left: 'BLACK_CONCRETE:0'
+#      down-right-left: 'BLACK_CONCRETE:0'
+#      up-right: 'BLACK_CONCRETE:0'
+#      up-down: 'BLACK_CONCRETE:0'
+#      up-left: 'BLACK_CONCRETE:0'
+#      down-right: 'BLACK_CONCRETE:0'
+#      down-left: 'BLACK_CONCRETE:0'
+#      right-left: 'BLACK_CONCRETE:0'
+#      right: 'BLACK_CONCRETE:0'
+#      left: 'BLACK_CONCRETE:0'
+#      up: 'BLACK_CONCRETE:0'
+#      down: 'BLACK_CONCRETE:0'
+#      no-path: 'BLACK_CONCRETE:0'

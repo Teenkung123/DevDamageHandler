@@ -1,0 +1,39 @@
+speed: Speed
+slow: Slow
+fast-digging: Haste
+slow-digging: Mining Fatigue
+increase-damage: Strength
+heal: Heal
+harm: Harm
+jump: Jump Boost
+confusion: Nausea
+regeneration: Regeneration
+damage-resistance: Damage Resistance
+fire-resistance: Fire Resistance
+water-breathing: Water Breathing
+invisibility: Invisibility
+blindness: Blindness
+night-vision: Night Vision
+hunger: Hunger
+weakness: Weakness
+poison: Poison
+wither: Wither
+health-boost: Health Boost
+absorption: Absorption
+saturation: Saturation
+glowing: Glowing
+levitation: Levitation
+luck: Luck
+unluck: Bad Luck
+slow-falling: Slow Falling
+conduit-power: Conduit Power
+dolphins-grace: Dolphins Grace
+bad-omen: Bad Omen
+hero-of-the-village: Hero Of The Village
+darkness: Darkness
+minecraft:wind-charged: 'Wind Charged'
+minecraft:raid-omen: 'Raid Omen'
+minecraft:infested: 'Infested'
+minecraft:weaving: 'Weaving'
+minecraft:trial-omen: 'Trial Omen'
+minecraft:oozing: 'Oozing'

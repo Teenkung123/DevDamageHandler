@@ -1,0 +1,5 @@
+# Map MythicMob ID -> template id defined above
+mobs:
+  ELDER_GUARDIAN: EARTH_TANK
+  SOLAR_WISP:     HOLY
+  SHADE:          SHADOW
