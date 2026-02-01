@@ -1,6 +1,5 @@
 package com.Teenkung.devDamageHandler.Indicator;
 
-import com.Teenkung.devDamageHandler.Config.ScaleTarget;
 import io.lumine.mythic.lib.damage.DamageType;
 import org.bukkit.configuration.ConfigurationSection;
 
@@ -24,6 +23,7 @@ public class IndicatorSettings {
     // icon system
     private final Map<DamageType, IconPair> typeIcons;
     public final String elementalCritIcon;
+    public final String skillCritIcon;
     public final String defaultIconNormal;
     public final String defaultIconCrit;
 
@@ -75,12 +75,14 @@ public class IndicatorSettings {
         // ----- 4) ICON -----
         ConfigurationSection icon = getSec(damageRoot, "icon");
         elementalCritIcon      = getStr(icon, "elemental-crit", "");
+        skillCritIcon          = getStr(icon, "skill-crit", "");
         defaultIconNormal      = getStr(icon, "default-normal", "");
         defaultIconCrit        = getStr(icon, "default-crit", "");
 
         showBothWhenElement    = getBool(icon,"show-both-when-element", false);
-        multiTypeIcons         = getBool(icon,"multi-type-icons", false);
         maxTypeIcons           = icon.getInt("max-type-icons", 0);
+        // If user sets max-type-icons > 1, assume they want multi icons enabled
+        multiTypeIcons         = getBool(icon,"multi-type-icons", false) || maxTypeIcons > 1;
         iconSeparator          = getStr(icon,"icon-separator", "");
         stripPhysicalWhenElement = getBool(icon,"strip-physical-when-element", true);
 
@@ -151,13 +153,28 @@ public class IndicatorSettings {
         return list.isEmpty() ? (crit ? defaultIconCrit : defaultIconNormal) : list.get(0);
     }
 
+    // Priority list for icon display (Specific -> Generic)
+    private static final List<DamageType> TYPE_PRIORITY = Arrays.asList(
+        DamageType.SKILL, DamageType.MAGIC, DamageType.WEAPON, 
+        DamageType.PROJECTILE, DamageType.UNARMED, DamageType.PHYSICAL
+    );
+
     public List<String> iconListFor(Collection<DamageType> types, boolean crit) {
         if (types == null || types.isEmpty()) return Collections.emptyList();
+        
+        // Sort types by priority
+        List<DamageType> sorted = new ArrayList<>(types);
+        sorted.sort(Comparator.comparingInt(dt -> {
+            int idx = TYPE_PRIORITY.indexOf(dt);
+            return idx == -1 ? 999 : idx; // Unknown types go last
+        }));
+        
         List<String> out = new ArrayList<>();
-        for (DamageType dt : types) {
+        for (DamageType dt : sorted) {
             IconPair p = typeIcons.get(dt);
             if (p == null) continue;
             out.add(crit ? p.crit() : p.normal());
+            // If multi-icons is false, we naturally stop after the first (highest priority) one
             if (!multiTypeIcons && !out.isEmpty()) break;
             if (maxTypeIcons > 0 && out.size() >= maxTypeIcons) break;
         }

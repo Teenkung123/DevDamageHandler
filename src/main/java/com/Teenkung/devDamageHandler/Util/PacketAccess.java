@@ -1,10 +1,13 @@
 package com.Teenkung.devDamageHandler.Util;
 
 import io.lumine.mythic.lib.damage.DamagePacket;
-import io.lumine.mythic.lib.listener.option.GameIndicators;
 
 import java.lang.reflect.Field;
 
+/**
+ * Utility for directly accessing DamagePacket's private value field.
+ * This is a workaround for when the public API doesn't expose certain modifiers.
+ */
 public final class PacketAccess {
     private static final Field VALUE_FIELD;
 
@@ -17,16 +20,6 @@ public final class PacketAccess {
             e.printStackTrace();
         }
         VALUE_FIELD = f;
-    }
-
-    public static void test() {
-        Field f = null;
-        try {
-            f = GameIndicators.class.getDeclaredField("displayIndicator");
-            f.setAccessible(true);
-        } catch (NoSuchFieldException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private PacketAccess() {}

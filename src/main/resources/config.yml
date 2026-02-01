@@ -1,130 +1,255 @@
-stats:
-  elemental_damage: '<white>Elemental Damage: <yellow>{value}%'
+# ╔════════════════════════════════════════════════════════════════════════════╗
+# ║                        DevDamageHandler Configuration                        ║
+# ╚════════════════════════════════════════════════════════════════════════════╝
 
+# ============================================================================
+# DAMAGE SYSTEM
+# ============================================================================
+damage:
+  
+  # When a weapon has elemental damage, ignore the carrier (PHYSICAL) packet
+  # This means only elemental damage counts for elemental weapons
+  ignore-carrier-on-elemental: true
+
+# ============================================================================
+# DEFENSE FORMULAS
+# ============================================================================
+# These formulas determine how defense stats reduce incoming damage.
+# All formulas are applied per-element (e.g., FIRE_DEFENSE affects fire damage)
+#
+# Available formula types:
+#   - DIMINISHING: damage * (1 - defense / (defense + base))
+#   - LINEAR:      damage * (1 - defense / 100)
+#   - FLAT:        damage - defense (minimum 1)
+#
+formulas:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # FLAT DEFENSE (e.g., FIRE_DEFENSE stat)
+  # ─────────────────────────────────────────────────────────────────────────
+  # Reduces damage based on defense stat value.
+  #
+  flat-defense:
+    
+    # Formula type: DIMINISHING, LINEAR, or FLAT
+    type: FLAT
+    
+    # Base value for DIMINISHING formula (ignored for other types)
+    # Higher base = weaker defense per point
+    base: 100
+    
+    # ┌─────────────────────────────────────────────────────────────────────┐
+    # │ DIMINISHING FORMULA: damage * (1 - defense / (defense + base))      │
+    # ├─────────────────────────────────────────────────────────────────────┤
+    # │ With base=100:                                                      │
+    # │   Defense   │ Damage Reduction │ Example (100 damage → result)      │
+    # │   10        │ 9.09%            │ 100 → 90.91                        │
+    # │   25        │ 20%              │ 100 → 80                           │
+    # │   50        │ 33.33%           │ 100 → 66.67                        │
+    # │   100       │ 50%              │ 100 → 50                           │
+    # │   200       │ 66.67%           │ 100 → 33.33                        │
+    # │   500       │ 83.33%           │ 100 → 16.67                        │
+    # │                                                                     │
+    # │ This creates "diminishing returns" - each point of defense is       │
+    # │ worth less than the previous one, preventing full immunity.         │
+    # └─────────────────────────────────────────────────────────────────────┘
+    #
+    # ┌─────────────────────────────────────────────────────────────────────┐
+    # │ LINEAR FORMULA: damage * (1 - defense / 100)                        │
+    # ├─────────────────────────────────────────────────────────────────────┤
+    # │   Defense   │ Damage Reduction │ Example (100 damage → result)      │
+    # │   10        │ 10%              │ 100 → 90                           │
+    # │   25        │ 25%              │ 100 → 75                           │
+    # │   50        │ 50%              │ 100 → 50                           │
+    # │   100       │ 100% (IMMUNE)    │ 100 → 0                            │
+    # │                                                                     │
+    # │ Simple but can reach 100% at high defense values.                   │
+    # └─────────────────────────────────────────────────────────────────────┘
+    #
+    # ┌─────────────────────────────────────────────────────────────────────┐
+    # │ FLAT FORMULA: damage - defense (minimum 1)                          │
+    # ├─────────────────────────────────────────────────────────────────────┤
+    # │   Defense   │ Actual Reduction │ Example (100 damage → result)      │
+    # │   10        │ -10 damage       │ 100 → 90                           │
+    # │   25        │ -25 damage       │ 100 → 75                           │
+    # │   50        │ -50 damage       │ 100 → 50                           │
+    # │   150       │ -150 damage      │ 100 → 1 (minimum)                  │
+    # │                                                                     │
+    # │ Best for low-damage scenarios. High defense nullifies weak hits.    │
+    # └─────────────────────────────────────────────────────────────────────┘
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PERCENTAGE DEFENSE (e.g., FIRE_DEFENSE_PERCENT stat)
+  # ─────────────────────────────────────────────────────────────────────────
+  # Simple percentage reduction: damage * (1 - percent / 100)
+  # Example: 30% defense → take 70% damage
+  #
+  percent-defense:
+    # Maximum percentage reduction allowed (prevents immunity)
+    cap: 90
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # WEAKNESS (e.g., FIRE_WEAKNESS stat)
+  # ─────────────────────────────────────────────────────────────────────────
+  # Percentage INCREASED damage taken: damage * (1 + weakness / 100)
+  # Example: 50% weakness → take 150% damage
+  #
+  weakness:
+    # Maximum weakness percentage (prevents one-shots)
+    cap: 200
+
+# ============================================================================
+# ELEMENT SYSTEM
+# ============================================================================
+elements:
+  
+  # Show "IMMUNE" indicator when element immunity triggers
+  show-immune-indicator: true
+  
+  # When immunity triggers (ELEMENT_X: 0.0 on mob), negate all damage from that element
+  immunity-negates-element: true
+
+# ============================================================================
+# PLAYER DEFENSE STATS
+# ============================================================================
+# These stats are read from MythicLib/MMOItems on the VICTIM player
+# 
+# For each element (e.g., FIRE, WATER, ICE, etc.):
+#   - {ELEMENT}_DEFENSE: Flat defense using the formula above
+#   - {ELEMENT}_DEFENSE_PERCENT: Percentage reduction
+#   - {ELEMENT}_WEAKNESS: Percentage INCREASED damage taken
+#
+# Application order:
+#   1. Weakness (increases damage)
+#   2. Flat Defense (formula reduction)
+#   3. Percent Defense (percentage reduction)
+
+# ============================================================================
+# DAMAGE INDICATORS (GameIndicators Integration)
+# ============================================================================
 game-indicators:
   damage:
-
-    ######################################################################
-    # 1) GENERAL TOGGLES
-    ######################################################################
+    
+    # General Settings
     general:
-      enabled: true                 # Master ON/OFF switch for damage indicators
-      split-holograms: true         # true = one hologram per line; false = join all lines into a single hologram
-
-    ######################################################################
-    # 2) NUMBER FORMATTING
-    ######################################################################
+      enabled: true              # Master toggle for damage indicators
+      split-holograms: true      # true = one hologram per line; false = combine all
+    
+    # Number Formatting
     numbers:
-      decimal-format: '0.##'        # Passed to GameIndicators (Java DecimalFormat pattern)
-      number-format:  '0.##'        # Our own formatter; same pattern rules as above
-      format: '{value}'             # Required by GameIndicators (ignored if you override lines yourself)
-
-    ######################################################################
-    # 3) LINE & TEXT FORMATTING
-    ######################################################################
+      decimal-format: '0.##'     # Java DecimalFormat pattern
+      number-format: '0.##'      # Plugin's own formatter
+      format: '{value}'          # GameIndicators format
+    
+    # Text Formatting
     text:
-      line-format: "{arrow}{icon}<white>{value}</white>"  # MiniMessage/legacy-safe string. Tokens: {arrow} {icon} {value}
-      immune-text: "{icon}<gray>IMMUNE"                   # Used when mobMul == 0; {icon} is optional placeholder
-
-    ######################################################################
-    # 4) ICON SYSTEM (flexible, multi-type, element-aware)
-    ######################################################################
+      line-format: "{arrow}{icon}<white>{value}</white>"
+      immune-text: "{icon}<gold>IMMUNE</gold>"
+    
+    # Icons per Damage Type (MythicLib DamageType enum)
     icon:
-      # -- Mapping MythicLib DamageType -> icons for normal & crit --
-      types:                      # Keys must match MythicLib DamageType enum names
+      types:
         PHYSICAL:
-          normal: ""
-          crit:   ""
+          normal: ""
+          crit: ""
         SKILL:
           normal: "᎕"
-          crit:   "᎕"
+          crit: "᎕"
         MAGIC:
-          normal: ""
-          crit:   ""
+          normal: ""
+          crit: ""
         UNARMED:
           normal: ""
-          crit:   ""
-        # Add more here (PROJECTILE, DOT, MINION, WEAPON, etc.)
-
-      elemental-crit: ""          # Extra icon prefix ONLY when an elemental hit crits (optional)
-      default-normal: ""          # Shown if no mapping is found for a type and it's not a crit
-      default-crit:   ""          # Fallback crit icon
-
-      # -- Multi-icon / ordering rules --
-      show-both-when-element: true        # true = show type icons even if element is present
-      multi-type-icons: true              # true = allow more than one DamageType icon on a single line
-      max-type-icons: 2                   # Limit how many type icons to show (0 = unlimited)
-      icon-separator: ""                  # String inserted between icons (" ", "<gray>|</gray>", etc.)
-      order: [ELEMENT, TYPES]             # Order to concatenate: options: ELEMENT, TYPES
-      strip-physical-when-element: true   # If any element is present, drop PHYSICAL from the type list
-
-    ######################################################################
-    # 5) ARROWS (UP/DOWN BASED ON MULTIPLIER)
-    ######################################################################
+          crit: ""
+        PROJECTILE:
+          normal: ""
+          crit: ""
+        WEAPON:
+          normal: ""
+          crit: ""
+      
+      elemental-crit: ""         # Extra icon for elemental crits
+      skill-crit: ""             # Extra icon for skill crits
+      default-normal: ""         # Fallback when no type mapping found
+      default-crit: ""           # Fallback crit icon
+      
+      # Multi-icon settings
+      show-both-when-element: true
+      multi-type-icons: true
+      max-type-icons: 2
+      icon-separator: ""
+      order: [ELEMENT, TYPES]
+      strip-physical-when-element: true
+    
+    # Resistance/Weakness Arrows
     arrows:
-      arrow-up:   "<green>▲<white>"       # Used when mobMul > 1
-      arrow-down: "<red>▼<white>"         # Used when mobMul < 1
-
-    ######################################################################
-    # 6) PHYSICS / HOLOGRAM MOTION (forwarded to GameIndicators)
-    ######################################################################
+      arrow-up: "<green>▲<white>"     # When target is weak (multiplier > 1)
+      arrow-down: "<red>▼<white>"     # When target resists (multiplier < 1)
+    
+    # Hologram Physics
     physics:
-      radial-velocity:         1.0         # Horizontal speed
-      gravity:                 1.0         # Downward acceleration factor
-      initial-upward-velocity: 1.0         # Initial "pop" upward
-      entity-height-percent:   0.75        # Spawn Y offset relative to entity height
-      entity-width-percent:    0.75        # Spawn radius offset relative to entity width
-      y-offset:                0.1         # Additional manual Y offset
-      r-offset:                0.1         # Additional manual radial offset
-      move: true                           # true = fly out; false = static
-      lifespan: 20                          # Ticks before despawn
-      tick-period: 3                        # Physics tick rate
-
-    ######################################################################
-    # 7) SCALING TARGET (WHAT "TOTAL" WE MATCH WHEN RESCALING LINES)
-    ######################################################################
+      radial-velocity: 1.0
+      gravity: 1.0
+      initial-upward-velocity: 1.0
+      entity-height-percent: 0.75
+      entity-width-percent: 0.75
+      y-offset: 0.1
+      r-offset: 0.1
+      move: true
+      lifespan: 20               # Ticks before despawn
+      tick-period: 3             # Physics tick rate
+    
+    # Value Scaling
     scaling:
-      scale-target: META         # Options:
-        #  - META    : dmg.getDamage()  (MythicLib final meta sum)
-        #  - PACKETS : Σ DamagePacket.getFinalValue()
-        #  - BUKKIT  : event.toBukkit().getFinalDamage()
-      #  - NONE    : don't rescale, use line values as-is
+      # Options: META, PACKETS, BUKKIT, NONE
+      # META    = dmg.getDamage() (MythicLib final)
+      # PACKETS = Sum of DamagePacket.getFinalValue()
+      # BUKKIT  = event.toBukkit().getFinalDamage()
+      # NONE    = No rescaling
+      scale-target: PACKETS
 
-######################################################################
-# 8) FONT MAP (custom glyph font for numbers)
-######################################################################
+# ============================================================================
+# CUSTOM FONT (for damage number glyphs)
+# ============================================================================
 font-map:
-  enabled: true                   # Master toggle for custom font encoding of numbers
-
+  enabled: true
+  
   custom-font:
-    enabled: true                 # Whether to use the custom glyph sets below
-
-    # Digits for normal (non-crit) numbers
+    enabled: true
+    
+    # Normal (non-crit) digits
     normal:
-      '0': ''
-      '1': ''
-      '2': ''
-      '3': ''
-      '4': ''
-      '5': ''
-      '6': ''
-      '7': ''
-      '8': ''
-      '9': ''
-      'dot':   ''               # decimal point
-      'inter': 'ᜍ'               # optional inter-digit spacer
-
-    # Digits for crit numbers
-    crit:
-      '0': ''
-      '1': ''
-      '2': ''
-      '3': ''
-      '4': ''
-      '5': ''
-      '6': ''
-      '7': ''
-      '8': ''
-      '9': ''
-      'dot':   ''
+      '0': ''
+      '1': ''
+      '2': ''
+      '3': ''
+      '4': ''
+      '5': ''
+      '6': ''
+      '7': ''
+      '8': ''
+      '9': ''
+      'dot': ''
       'inter': 'ᜍ'
+    
+    # Crit digits
+    crit:
+      '0': ''
+      '1': ''
+      '2': ''
+      '3': ''
+      '4': ''
+      '5': ''
+      '6': ''
+      '7': ''
+      '8': ''
+      '9': ''
+      'dot': ''
+      'inter': 'ᜍ'
+
+# ============================================================================
+# DEBUG
+# ============================================================================
+debug:
+  # Players who have debug mode enabled by default on login
+  default-enabled: []

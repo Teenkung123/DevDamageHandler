@@ -6,13 +6,11 @@ import io.lumine.mythic.lib.api.event.IndicatorDisplayEvent;
 import io.lumine.mythic.lib.damage.DamageType;
 import io.lumine.mythic.lib.element.Element;
 import io.lumine.mythic.lib.hologram.Hologram;
-import io.lumine.mythic.lib.listener.option.GameIndicators;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.MemoryConfiguration;
 import org.bukkit.entity.Entity;
 import org.bukkit.util.Vector;
 
@@ -20,7 +18,7 @@ import java.text.DecimalFormat;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class CustomIndicators extends GameIndicators {
+public class CustomIndicators {
 
     private static final Random RNG = new Random();
 
@@ -28,12 +26,22 @@ public class CustomIndicators extends GameIndicators {
     private final DecimalFormat formatter;
     private final FontCodec font;
 
-    public CustomIndicators(ConfigurationSection original, FontCodec font) {
-        // Give GameIndicators a fake section with the numeric/physics stuff it needs
-        super(stubForGameIndicators(original));
-        this.settings  = new IndicatorSettings(original);
+    // Physics settings from indicators
+    private final double yOffset;
+    private final double rOffset;
+    private final double entityWidthPercent;
+    private final double entityHeightPercent;
+
+    public CustomIndicators(ConfigurationSection baseConfig, FontCodec font) {
+        this.settings  = new IndicatorSettings(baseConfig);
         this.formatter = MythicLib.plugin.getMMOConfig().newDecimalFormat(settings.numberFormat);
         this.font      = font;
+        
+        // Cache physics for quicker access
+        this.yOffset = settings.yOffset;
+        this.rOffset = settings.rOffset;
+        this.entityWidthPercent = settings.entityWidthPercent;
+        this.entityHeightPercent = settings.entityHeightPercent;
     }
 
     /* --------------------------------------------------------- */
@@ -104,21 +112,42 @@ public class CustomIndicators extends GameIndicators {
                     }
                     case TYPES -> {
                         if (settings.showBothWhenElement || l.element == null) {
+                            // Get types or empty set
+                            Set<DamageType> filtered = Collections.emptySet();
                             if (l.types != null && !l.types.isEmpty()) {
-                                Set<DamageType> filtered = l.types;
                                 if (l.element != null && settings.stripPhysicalWhenElement) {
-                                    // remove PHYSICAL if we detected any element damage
-                                    filtered = EnumSet.copyOf(filtered);
+                                    filtered = EnumSet.copyOf(l.types);
                                     filtered.remove(DamageType.PHYSICAL);
-                                }
-                                if (!filtered.isEmpty()) {
-                                    parts.addAll(settings.iconListFor(filtered, l.crit));
+                                } else {
+                                    filtered = l.types;
                                 }
                             }
+                            
+                            // Get base type icons (mutable list)
+                            List<String> typeIcons = new ArrayList<>(settings.iconListFor(filtered, l.crit));
+                            
+                            // Inject Skill Crit icon
+                            if (l.skillCrit && !settings.skillCritIcon.isEmpty()) {
+                                if (!typeIcons.isEmpty()) {
+                                    // Prepend to first icon
+                                    typeIcons.set(0, settings.skillCritIcon + typeIcons.get(0));
+                                } else {
+                                    // No type icons -> add skill crit icon standalone
+                                    typeIcons.add(settings.skillCritIcon);
+                                }
+                            }
+                            
+                            parts.addAll(typeIcons);
                         }
                     }
 
                 }
+            }
+
+            // Fallback: Default icons if nothing added yet
+            if (parts.isEmpty()) {
+                String def = l.crit ? settings.defaultIconCrit : settings.defaultIconNormal;
+                if (!def.isEmpty()) parts.add(def);
             }
 
             icon = settings.joinIcons(parts);
@@ -140,14 +169,14 @@ public class CustomIndicators extends GameIndicators {
     }
 
     private String buildElementIcon(Element element, boolean crit) {
-        // MythicLib “color” is usually a legacy/§ color; loreIcon is the actual glyph
+        // MythicLib "color" is usually a legacy/§ color; loreIcon is the actual glyph
         String color = safe(element.getColor());
         String glyph = safe(element.getLoreIcon());
 
-        // Optional: prepend your crit icon. If you don’t want that, just remove this line.
+        // Optional: prepend your crit icon. If you don't want that, just remove this line.
         String critAddon = crit ? safe(settings.elementalCritIcon) : "";
 
-        // DO NOT font-encode this glyph—leave it raw so MythicLib’s RP font shows it.
+        // DO NOT font-encode this glyph—leave it raw so MythicLib's RP font shows it.
         return critAddon + color + glyph;
     }
 
@@ -180,46 +209,51 @@ public class CustomIndicators extends GameIndicators {
         if (!settings.move) {
             Bukkit.getScheduler().runTaskLater(MythicLib.plugin, holo::despawn, settings.lifespan);
         } else {
-            holo.flyOut(this, randomDir(entity));
+            // Smooth physics - run every tick for fluid motion
+            final long lifespan = settings.lifespan;
+            final double radialVel = settings.radialVelocity;
+            final double upwardVel = settings.initialUpwardVelocity;
+            final double gravity = settings.gravity;
+            
+            new org.bukkit.scheduler.BukkitRunnable() {
+                long ticks = 0;
+                double x = loc.getX();
+                double y = loc.getY();
+                double z = loc.getZ();
+                
+                // Velocity per tick (divide by 20 to convert blocks/sec to blocks/tick)
+                Vector dir = randomDir();
+                double vx = dir.getX() * radialVel / 20.0;
+                double vy = upwardVel / 20.0;
+                double vz = dir.getZ() * radialVel / 20.0;
+                
+                // Gravity per tick squared (acceleration in blocks/tick²)
+                double grav = gravity / 400.0;  // 20*20 = 400
+
+                @Override
+                public void run() {
+                    if (++ticks >= lifespan || !holo.isSpawned()) {
+                        holo.despawn();
+                        cancel();
+                        return;
+                    }
+                    
+                    // Apply gravity
+                    vy -= grav;
+                    
+                    // Update position
+                    x += vx;
+                    y += vy;
+                    z += vz;
+                    
+                    holo.updateLocation(new Location(loc.getWorld(), x, y, z));
+                }
+            }.runTaskTimer(MythicLib.plugin, 1L, 1L);  // Every tick for smooth motion
         }
     }
-
-    private Vector randomDir(Entity e) {
+    
+    private Vector randomDir() {
         double ang = RNG.nextDouble() * Math.PI * 2;
         return new Vector(Math.cos(ang), 0, Math.sin(ang));
     }
-
-    /**
-     * Build a minimal section containing only what GameIndicators cares about
-     * so we can keep all the fancy stuff in our own settings.
-     */
-    private static ConfigurationSection stubForGameIndicators(ConfigurationSection damageRoot) {
-        // damageRoot = game-indicators.damage
-        MemoryConfiguration mc = new MemoryConfiguration();
-
-        // numbers
-        ConfigurationSection numbers = damageRoot.getConfigurationSection("numbers");
-        String dec = numbers != null ? numbers.getString("decimal-format", "0.##") : "0.##";
-        String fmt = numbers != null ? numbers.getString("format", "{value}")      : "{value}";
-        mc.set("decimal-format", dec);
-        mc.set("format", fmt);
-
-        // physics
-        ConfigurationSection physics = damageRoot.getConfigurationSection("physics");
-        mc.set("radial-velocity",         physics != null ? physics.getDouble("radial-velocity", 1.0) : 1.0);
-        mc.set("gravity",                 physics != null ? physics.getDouble("gravity", 1.0) : 1.0);
-        mc.set("initial-upward-velocity", physics != null ? physics.getDouble("initial-upward-velocity", 1.0) : 1.0);
-        mc.set("entity-height-percent",   physics != null ? physics.getDouble("entity-height-percent", 0.75) : 0.75);
-        mc.set("entity-width-percent",    physics != null ? physics.getDouble("entity-width-percent", 0.75) : 0.75);
-        mc.set("y-offset",                physics != null ? physics.getDouble("y-offset", 0.1) : 0.1);
-        mc.set("r-offset",                physics != null ? physics.getDouble("r-offset", 0.1) : 0.1);
-        mc.set("move",                    physics != null ? physics.getBoolean("move", true) : true);
-        mc.set("lifespan",                physics != null ? physics.getLong("lifespan", 20L) : 20L);
-        mc.set("tick-period",             physics != null ? physics.getLong("tick-period", 3L) : 3L);
-
-        return mc;
-    }
-
-
-
 }

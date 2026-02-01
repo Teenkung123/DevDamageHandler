@@ -28,14 +28,33 @@ repositories {
         name = "jitpack"
         url = "https://jitpack.io/"
     }
+    maven { url  = 'https://repo.extendedclip.com/content/repositories/placeholderapi/' }
+    maven { url = "https://repo.auxilor.io/repository/maven-public/" }
 }
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.6-R0.1-SNAPSHOT")
-    compileOnly 'io.lumine:MythicLib-dist:1.6.2-SNAPSHOT'
-    compileOnly 'io.lumine:Mythic-Dist:5.6.1'
+    compileOnly 'io.lumine:MythicLib-dist:1.7.1-SNAPSHOT'
+    compileOnly 'io.lumine:Mythic-Dist:5.11.1'
     compileOnly 'net.Indyuce:MMOItems-API:6.9.5-SNAPSHOT'
+    compileOnly 'com.github.HologramLib:HologramLib:1.7.6'
+    compileOnly("com.willfp:eco:6.77.2")
+    compileOnly("com.willfp:libreforge:4.79.0")
+    compileOnly("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
     compileOnly fileTree(dir: 'libs', include: ['*.jar'])
+    
+    // Test dependencies
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
+    
+    // Need these at test runtime for mocking
+    testImplementation("io.papermc.paper:paper-api:1.21.6-R0.1-SNAPSHOT")
+    testImplementation 'io.lumine:MythicLib-dist:1.7.1-SNAPSHOT'
+}
+
+test {
+    useJUnitPlatform()
 }
 
 tasks {

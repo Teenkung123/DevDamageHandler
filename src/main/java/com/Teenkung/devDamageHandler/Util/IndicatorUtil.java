@@ -1,48 +1,56 @@
 package com.Teenkung.devDamageHandler.Util;
 
+import com.Teenkung.devDamageHandler.DevDamageHandler;
+import com.Teenkung.devDamageHandler.Indicator.CustomIndicators;
+import com.Teenkung.devDamageHandler.Indicator.IndicatorLine;
 import io.lumine.mythic.lib.MythicLib;
-import io.lumine.mythic.lib.api.event.IndicatorDisplayEvent;
-import io.lumine.mythic.lib.listener.option.DamageIndicators;
 import org.bukkit.entity.Entity;
-import org.bukkit.event.HandlerList;
-import org.bukkit.plugin.RegisteredListener;
-import org.bukkit.util.Vector;
+import org.bukkit.plugin.java.JavaPlugin;
 
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Collections;
 
+/**
+ * Utility for displaying custom indicators.
+ * This now uses our own CustomIndicators instead of the removed DamageIndicators.
+ */
 public final class IndicatorUtil {
-
-    private static DamageIndicators cached;
 
     private IndicatorUtil() {}
 
-    /** Try to find MythicLib's DamageIndicators listener once. */
-    public static DamageIndicators get() {
-        if (cached != null) return cached;
-        for (RegisteredListener rl : HandlerList.getRegisteredListeners(MythicLib.plugin)) {
-            if (rl.getListener() instanceof DamageIndicators di) {
-                cached = di;
-                break;
-            }
-        }
-        return cached;
-    }
-
-    /** Show a custom indicator line (MiniMessage/legacy supported by MythicLib.parseColors). */
+    /**
+     * Show a custom indicator line.
+     * Falls back to logging if the plugin instance is not available.
+     */
     public static void show(Entity target, String message) {
-        DamageIndicators di = get();
-        if (di == null) {
-            // Fallback: just log
-            MythicLib.plugin.getLogger().warning("Could not find DamageIndicators listener.");
+        DevDamageHandler plugin = JavaPlugin.getPlugin(DevDamageHandler.class);
+        if (plugin == null) {
+            MythicLib.plugin.getLogger().warning("Could not find DevDamageHandler plugin instance.");
             return;
         }
-        // Any direction vector you like; this mimics MythicLib default
-        Vector dir = randomDir(target);
-        di.displayIndicator(target, message, dir, IndicatorDisplayEvent.IndicatorType.DAMAGE);
+        
+        CustomIndicators indicators = plugin.getIndicators();
+        if (indicators == null) {
+            MythicLib.plugin.getLogger().warning("CustomIndicators not initialized.");
+            return;
+        }
+        
+        // Create a simple indicator line for the message
+        // Using null element and no types for a generic message display
+        IndicatorLine line = new IndicatorLine(0, false, false, false, null, null, 1.0, message);
+        indicators.displayLines(target, Collections.singletonList(line));
     }
 
-    private static Vector randomDir(Entity e) {
-        double a = ThreadLocalRandom.current().nextDouble() * Math.PI * 2;
-        return new Vector(Math.cos(a), 0, Math.sin(a));
+    /**
+     * Show a numeric damage indicator with specific value.
+     */
+    public static void showDamage(Entity target, double value, boolean crit) {
+        DevDamageHandler plugin = JavaPlugin.getPlugin(DevDamageHandler.class);
+        if (plugin == null) return;
+        
+        CustomIndicators indicators = plugin.getIndicators();
+        if (indicators == null) return;
+        
+        IndicatorLine line = new IndicatorLine(value, false, crit, false, null, null, 1.0, null);
+        indicators.displayLines(target, Collections.singletonList(line));
     }
 }

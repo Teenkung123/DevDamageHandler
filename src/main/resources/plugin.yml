@@ -5,6 +5,8 @@ api-version: '1.21'
 prefix: PluginManager
 authors: [ Teenkung123 ]
 depend: [MythicLib, MythicMobs, MMOItems]
+softdepend:
+  - EcoEnchants
 
 commands:
   ddh:
