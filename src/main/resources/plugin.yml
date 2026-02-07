@@ -6,6 +6,8 @@ prefix: PluginManager
 authors: [ Teenkung123 ]
 depend: [MythicLib, MythicMobs, MMOItems]
 softdepend:
+  - eco
+  - libreforge
   - EcoEnchants
 
 commands:

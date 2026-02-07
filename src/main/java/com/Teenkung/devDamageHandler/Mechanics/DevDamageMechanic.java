@@ -7,6 +7,7 @@ import io.lumine.mythic.api.skills.ITargetedEntitySkill;
 import io.lumine.mythic.api.skills.SkillMetadata;
 import io.lumine.mythic.api.skills.SkillResult;
 import io.lumine.mythic.api.skills.placeholders.PlaceholderDouble;
+import io.lumine.mythic.api.skills.placeholders.PlaceholderString;
 import io.lumine.mythic.core.skills.SkillMechanic;
 import io.lumine.mythic.lib.MythicLib;
 import io.lumine.mythic.lib.api.item.NBTItem;
@@ -26,6 +27,7 @@ public class DevDamageMechanic extends SkillMechanic implements ITargetedEntityS
     protected PlaceholderDouble amount;
     protected String element;
     protected String damageTypeStr;
+    protected PlaceholderString attackerName;
     protected boolean debug;
     
     // Standard params
@@ -34,6 +36,7 @@ public class DevDamageMechanic extends SkillMechanic implements ITargetedEntityS
     protected boolean preventKnockback;
     protected boolean ignoreImmunity;
     protected boolean ignoreArmor;
+    protected boolean noAnger;
     
     // Cache for repeating skills to persist resolved elements
     private static final java.util.Map<io.lumine.mythic.api.skills.SkillMetadata, java.util.Map<String, Map<Element, Double>>> CACHE = 
@@ -47,13 +50,15 @@ public class DevDamageMechanic extends SkillMechanic implements ITargetedEntityS
         this.amount = config.getPlaceholderDouble(new String[]{"amount", "a"}, 1);
         this.element = config.getString(new String[]{"element", "e"}, null); // Removed 'type' alias to avoid conflict
         this.damageTypeStr = config.getString(new String[]{"type", "t", "damage-type", "dt", "types"}, null);
+        this.attackerName = config.getPlaceholderString(new String[]{"attacker", "source", "s"}, null);
         this.debug = config.getBoolean(new String[]{"debug", "d"}, false);
         
         this.hp = config.getBoolean(new String[]{"hp", "hitplayers"}, true);
         this.hnp = config.getBoolean(new String[]{"hnp", "hitnonplayers"}, true);
         this.preventKnockback = config.getBoolean(new String[]{"pkb", "preventknockback"}, false);
-        this.ignoreImmunity = config.getBoolean(new String[]{"ii", "ignoreimmunity"}, false);
+        this.ignoreImmunity = config.getBoolean(new String[]{"ii", "ignoreimmunity", "pi"}, false); // Added 'pi'
         this.ignoreArmor = config.getBoolean(new String[]{"ia", "ignorearmor"}, false);
+        this.noAnger = config.getBoolean(new String[]{"noanger", "na"}, false);
     }
 
     @Override
@@ -68,7 +73,31 @@ public class DevDamageMechanic extends SkillMechanic implements ITargetedEntityS
         if (!this.hp && livingTarget instanceof Player) return SkillResult.CONDITION_FAILED;
         if (!this.hnp && !(livingTarget instanceof Player)) return SkillResult.CONDITION_FAILED;
         
+        if (!this.hnp && !(livingTarget instanceof Player)) return SkillResult.CONDITION_FAILED;
+        
         LivingEntity caster = (LivingEntity) data.getCaster().getEntity().getBukkitEntity();
+        
+        // Resolve Attacker Override
+        if (this.attackerName != null) {
+            String name = this.attackerName.get(data, target);
+            if (name != null && !name.isEmpty()) {
+                // Try UUID
+                try {
+                    java.util.UUID uuid = java.util.UUID.fromString(name);
+                    org.bukkit.entity.Entity e = org.bukkit.Bukkit.getEntity(uuid);
+                    if (e instanceof LivingEntity le) {
+                        caster = le;
+                    }
+                } catch (IllegalArgumentException e) {
+                    // Try Player Name
+                    Player p = org.bukkit.Bukkit.getPlayerExact(name);
+                    if (p != null) {
+                        caster = p;
+                    }
+                }
+            }
+        }
+
         double damage = this.amount.get(data, target);
 
         // Calculate elements
@@ -219,14 +248,19 @@ public class DevDamageMechanic extends SkillMechanic implements ITargetedEntityS
         }
 
         // Inject into DamageHandler
+        // Inject pending values
         if (!elements.isEmpty()) {
             DamageHandler.pendingElements.set(elements);
         }
         if (!damageTypes.isEmpty()) {
             DamageHandler.pendingTypes.set(damageTypes);
         }
+        
+        // Handle No Anger (Set pending attacker so valid stats work even with null damager)
+        // Or if simple dev-damage, also set it to ensure correct attribution
+        DamageHandler.pendingAttacker.set(caster);
 
-        // Handle Ignore Immunity (ii)
+        // Handle Ignore Immunity (ii / pi)
         if (this.ignoreImmunity) {
             livingTarget.setNoDamageTicks(0);
         }
@@ -238,20 +272,24 @@ public class DevDamageMechanic extends SkillMechanic implements ITargetedEntityS
         }
 
         // Deal damage
-        // If Ignore Armor (ia), we might want to use a different approach, 
-        // but damage() is standard. True armor ignoring usually requires adjusting final damage 
-        // or using specific damage causes, but MythicLib handles calculation.
-        // For now we just call damage.
-        livingTarget.damage(damage, caster);
+        // If noAnger is true, pass null as source so mob doesn't aggro
+        try {
+            if (this.noAnger) {
+                livingTarget.damage(damage, (org.bukkit.entity.Entity) null);
+            } else {
+                livingTarget.damage(damage, caster);
+            }
+        } finally {
+            // Cleanup just in case (though DamageHandler removes it too)
+            DamageHandler.pendingElements.remove();
+            DamageHandler.pendingTypes.remove();
+            DamageHandler.pendingAttacker.remove();
+        }
         
         // Restore velocity for pkb
         if (this.preventKnockback && oldVelocity != null) {
             livingTarget.setVelocity(oldVelocity);
         }
-        
-        // Cleanup just in case (though DamageHandler removes it too)
-        DamageHandler.pendingElements.remove();
-        DamageHandler.pendingTypes.remove();
 
         return SkillResult.SUCCESS;
     }

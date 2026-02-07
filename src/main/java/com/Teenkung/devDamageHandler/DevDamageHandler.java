@@ -67,6 +67,19 @@ public final class DevDamageHandler extends JavaPlugin {
         } catch (Exception | NoClassDefFoundError e) {
             getLogger().warning("HologramLib not available, using MythicLib indicators");
         }
+
+        // Register LibreForge effects early (in onLoad) so they are available
+        // before EcoEnchants scans the Effects registry during its own initialization.
+        // We use class loading check here since Bukkit.getPluginManager().isPluginEnabled() 
+        // won't work in onLoad (plugins aren't enabled yet).
+        try {
+            Class.forName("com.willfp.libreforge.effects.Effects");
+            LibreForgeHook.register(this);
+            getLogger().info("LibreForge effects registered early (in onLoad).");
+        } catch (ClassNotFoundException | NoClassDefFoundError e) {
+            // LibReforge not present, will skip integration
+            getLogger().info("LibReforge not found, skipping effect registration.");
+        }
     }
 
     @Override
@@ -75,6 +88,29 @@ public final class DevDamageHandler extends JavaPlugin {
 
         // Try to get HologramLib manager
         try {
+            // Fix for HologramLib hotloading (it might hold stale plugin reference from previous load)
+            // We use reflection to force update the 'plugin' field in HologramLib class if it exists
+            try {
+                Class<?> clazz = Class.forName("com.maximde.hologramlib.HologramLib");
+                java.lang.reflect.Field pluginField = clazz.getDeclaredField("plugin");
+                pluginField.setAccessible(true);
+                pluginField.set(null, this);
+                getLogger().info("Refreshed HologramLib plugin instance via reflection.");
+                
+                // Also try to fix BukkitTasks if it holds a separate reference
+                try {
+                    Class<?> tasksClazz = Class.forName("com.maximde.hologramlib.utils.BukkitTasks");
+                    java.lang.reflect.Field tasksPluginField = tasksClazz.getDeclaredField("plugin");
+                    tasksPluginField.setAccessible(true);
+                    tasksPluginField.set(null, this);
+                    getLogger().info("Refreshed BukkitTasks plugin instance via reflection.");
+                } catch (Throwable t2) {
+                    // Ignore if BukkitTasks doesn't have the field or failed
+                }
+            } catch (Throwable t) {
+                // Ignore if field doesn't exist or other issues - we just try our best
+            }
+
             HologramLib.getManager().ifPresentOrElse(
                 manager -> {
                     hologramManager = manager;
@@ -111,18 +147,6 @@ public final class DevDamageHandler extends JavaPlugin {
         }
 
         getLogger().info("DevDamageHandler enabled - Elements, Types, Crits, and Custom Stats");
-
-        // Register LibreForge hook
-        if (Bukkit.getPluginManager().isPluginEnabled("libreforge")) {
-            LibreForgeHook.register(this);
-            getLogger().info("LibreForge integration enabled.");
-        }
-
-        Bukkit.getScheduler().runTaskLater(this, () -> {    
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mythicmobs reload");
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mmoitems reload");
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "ecoenchants reload");
-        }, 20L);
     }
 
     @Override

@@ -4,3 +4,4 @@
 /.vscode
 /bin/
 /run/
+/.agent/rules/always_do.md

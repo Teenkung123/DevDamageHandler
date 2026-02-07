@@ -304,6 +304,6 @@ public class HologramLibIndicators {
                 
                 ticks += updateRate;
             }
-        }.runTaskTimer(plugin, updateRate, updateRate);
+        }.runTaskTimer(plugin, 0L, updateRate);
     }
 }

@@ -22,6 +22,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 
 import java.util.*;
 
@@ -49,6 +51,7 @@ public class DamageHandler implements Listener {
     public static final ThreadLocal<org.bukkit.command.CommandSender> debugOverride = new ThreadLocal<>();
     public static final ThreadLocal<Double> pendingMultiplier = new ThreadLocal<>();
     public static final ThreadLocal<Double> pendingFlatDamage = new ThreadLocal<>();
+    public static final ThreadLocal<LivingEntity> pendingAttacker = new ThreadLocal<>();
 
     /* ======================================================================
        EVENT FILTERS
@@ -79,10 +82,25 @@ public class DamageHandler implements Listener {
     }
     
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onEntityDamage(org.bukkit.event.entity.EntityDamageByEntityEvent event) {
-        // Skip player attackers UNLESS using /ddh damage command (debugOverride set)
-        if (event.getDamager() instanceof Player && debugOverride.get() == null) return;
-        if (!(event.getDamager() instanceof LivingEntity attacker) || !(event.getEntity() instanceof LivingEntity target)) return;
+    public void onEntityDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof LivingEntity target)) return;
+
+        // Determine attacker
+        org.bukkit.entity.Entity attackerEntity = null;
+        if (event instanceof EntityDamageByEntityEvent edbe) {
+            attackerEntity = edbe.getDamager();
+            // Skip player attackers UNLESS using /ddh damage command (debugOverride set)
+            if (attackerEntity instanceof Player && debugOverride.get() == null) return;
+        }
+
+        // Check for pending attacker (noanger/dev-damage override)
+        // This allows us to process "noanger" damage (which is generic/null source) as if it came from the caster
+        LivingEntity forcedAttacker = pendingAttacker.get();
+        if (forcedAttacker != null) {
+            attackerEntity = forcedAttacker;
+        }
+        
+        if (!(attackerEntity instanceof LivingEntity attacker)) return;
 
         try {
             // 1. Check skill overrides first (from DevDamageMechanic)
@@ -122,7 +140,7 @@ public class DamageHandler implements Listener {
             
             HitContext ctx = plugin.consumeHit(dmg);
             if (ctx != null) {
-                displayIndicatorsWrapper(target, attacker, dmg, ctx);
+                displayIndicatorsWrapper(target, attacker, dmg, ctx, null);
             }
             
         } catch (Exception e) {
@@ -485,15 +503,65 @@ public class DamageHandler implements Listener {
         if (ctx == null) return;
 
         // Display
-        displayIndicatorsWrapper(event.getEntity(), event.getAttacker().getEntity(), dmg, ctx);
+        displayIndicatorsWrapper(event.getEntity(), event.getAttacker().getEntity(), dmg, ctx, null);
     }
     
-    private void displayIndicatorsWrapper(LivingEntity target, LivingEntity attacker, DamageMetadata dmg, HitContext ctx) {
+    /* ======================================================================
+       GLOBAL DAMAGE LISTENER (VANILLA FALLBACK)
+       ====================================================================== */
+
+    // Tracks when an indicator was last shown for an entity to prevent duplicates
+    private final Map<org.bukkit.entity.Entity, Long> lastIndicatorTick = 
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onGlobalDamage(org.bukkit.event.entity.EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof LivingEntity target)) return;
+        
+        // Check if we already showed an indicator this tick (handled by DDH core)
+        long currentTick = target.getWorld().getFullTime();
+        Long lastTick = lastIndicatorTick.get(target);
+        
+        if (lastTick != null && lastTick == currentTick) {
+            return;
+        }
+        
+        // Skip if damage is zero or negative
+        double finalDamage = event.getFinalDamage();
+        if (finalDamage <= 0.001) return;
+
+        // Construct a simple vanilla context
+        HitContext vanillaCtx = new HitContext(
+            Collections.emptyMap(), // No elements
+            Collections.emptyMap(),
+            Collections.emptyMap(),
+            Collections.emptyMap(),
+            finalDamage,            // All damage is non-elemental
+            1.0,                    // Multiplier
+            Collections.emptySet(), // No elem crits
+            false,                  // No non-elem crit
+            false,                  // No skill crit
+            false,                  // Not pure elemental
+            "VANILLA_" + event.getCause().name(),
+            Collections.emptySet()
+        );
+        
+        // Create dummy metadata for the scaler
+        DamageMetadata dummyMeta = new DamageMetadata(finalDamage, DamageType.PHYSICAL);
+        
+        // Display
+        displayIndicatorsWrapper(target, null, dummyMeta, vanillaCtx, Collections.emptySet());
+    }
+
+    private void displayIndicatorsWrapper(LivingEntity target, LivingEntity attacker, DamageMetadata dmg, HitContext ctx, Set<DamageType> typeOverride) {
+        // Mark that we handled this entity this tick
+        lastIndicatorTick.put(target, target.getWorld().getFullTime());
+
         IndicatorSettings settings = plugin.getIndicatorSettings();
         if (settings == null || !settings.enabled) return;
         
         // Build lines
-        Set<DamageType> baseTypes = dmg.collectTypes();
+        Set<DamageType> baseTypes = (typeOverride != null) ? typeOverride : dmg.collectTypes();
         
         // Stat provider for crit power lookups
         java.util.function.Function<String, Double> statProvider;
@@ -508,6 +576,11 @@ public class DamageHandler implements Listener {
         
         // Scale
         double finalDamage = dmg.getPackets().stream().mapToDouble(DamagePacket::getFinalValue).sum();
+        
+        // Safety fallback for vanilla contexts or empty packets
+        if (dmg.getPackets().isEmpty()) {
+            finalDamage = ctx.nonElemDamage();
+        }
         
         double scaleTarget = IndicatorBuilder.getScalingTarget(settings, dmg, lines, finalDamage);
         lines = IndicatorBuilder.scaleLines(lines, scaleTarget);
