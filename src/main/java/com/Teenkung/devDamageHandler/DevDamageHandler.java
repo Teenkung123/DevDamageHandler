@@ -1,5 +1,6 @@
 package com.Teenkung.devDamageHandler;
 
+import com.Teenkung.devDamageHandler.API.DevDamageAPI;
 import com.Teenkung.devDamageHandler.Commands.DevDHCommandExecutor;
 import com.Teenkung.devDamageHandler.Commands.DevDHCommandTabCompleter;
 import com.Teenkung.devDamageHandler.Handlers.DamageConfig;
@@ -165,6 +166,9 @@ public final class DevDamageHandler extends JavaPlugin {
         }
 
         StatTracking.removeAllPlayers();
+
+        // Cleanup API instance
+        DevDamageAPI.cleanup();
 
         getLogger().info("DevDamageHandler disabled");
     }

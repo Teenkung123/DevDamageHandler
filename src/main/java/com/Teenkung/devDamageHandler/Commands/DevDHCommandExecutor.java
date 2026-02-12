@@ -7,11 +7,15 @@ import com.Teenkung.devDamageHandler.Handlers.DamageHandler;
 import com.Teenkung.devDamageHandler.Handlers.MobStatProvider;
 import io.lumine.mythic.bukkit.MythicBukkit;
 import io.lumine.mythic.lib.MythicLib;
+import io.lumine.mythic.lib.api.player.EquipmentSlot;
 import io.lumine.mythic.lib.api.player.MMOPlayerData;
 import io.lumine.mythic.lib.api.stat.StatInstance;
 import io.lumine.mythic.lib.api.stat.StatMap;
 import io.lumine.mythic.lib.api.stat.modifier.StatModifier;
+import io.lumine.mythic.lib.api.stat.modifier.TemporaryStatModifier;
 import io.lumine.mythic.lib.damage.DamageType;
+import io.lumine.mythic.lib.player.modifier.ModifierSource;
+import io.lumine.mythic.lib.player.modifier.ModifierType;
 import io.lumine.mythic.lib.element.Element;
 import org.bukkit.Bukkit;
 import org.bukkit.attribute.Attribute;
@@ -59,6 +63,8 @@ public final class DevDHCommandExecutor implements CommandExecutor {
             case "debuglibreforge" -> handleLibReforgeDebug(sender, label, args);
             case "damage" -> handleDamage(sender, label, args);
             case "stats" -> handleStats(sender, args);
+            case "stat" -> handleStat(sender, label, args);
+            case "tempstat" -> handleTempStat(sender, label, args);
             default -> {
                 sendHelp(sender, label);
                 yield true;
@@ -445,6 +451,11 @@ public final class DevDHCommandExecutor implements CommandExecutor {
     private void dumpMobStats(CommandSender sender, LivingEntity target, String filter) {
         MobStatProvider provider = new MobStatProvider(target);
 
+        dumpVanillaStats(sender, target, filter);
+        dumpMythicMobStats(sender, target, provider, filter);
+    }
+
+    private void dumpVanillaStats(CommandSender sender, LivingEntity target, String filter) {
         Msg.send(sender, "<yellow>Vanilla/Bukkit:</yellow>");
 
         if (matchesFilter("health", filter)) {
@@ -465,36 +476,308 @@ public final class DevDHCommandExecutor implements CommandExecutor {
         if (atk != null && matchesFilter("attack damage", filter)) {
             Msg.send(sender, "  <gray>Attack Damage:</gray> <white>" + DamageDebug.fmt(atk.getValue()) + "</white>");
         }
+    }
 
-        if (MythicBukkit.inst().getMobManager().isMythicMob(target)) {
-            Msg.send(sender, "<yellow>MythicMob Variables (Stats):</yellow>");
-
-            String[] keys = {
-                    "CRITICAL_STRIKE_CHANCE", "CRITICAL_STRIKE_POWER",
-                    "ELEMENTAL_CRITICAL_STRIKE_CHANCE", "ELEMENTAL_CRITICAL_STRIKE_POWER",
-                    "ADDITIONAL_ELEMENTAL_DAMAGE", "PVP_DAMAGE", "PVE_DAMAGE"
-            };
-
-            boolean foundAny = false;
-            for (String k : keys) {
-                if (!matchesFilter(k, filter)) continue;
-                double val = provider.apply(k);
-                if (val != 0) {
-                    Msg.send(sender, "  <green>" + k + "</green>: <white>" + DamageDebug.fmt(val) + "</white>");
-                    foundAny = true;
-                }
-            }
-
-            if (!foundAny) Msg.send(sender, "  <gray>(None of the standard stat variables found)</gray>");
-
-            if (provider.getActiveMob() != null && (filter == null || filter.isEmpty())) {
-                Msg.send(sender, "<yellow>MythicMob Info:</yellow>");
-                Msg.send(sender, "  <gray>Type:</gray> <white>" + provider.getActiveMob().getMobType() + "</white>");
-                Msg.send(sender, "  <gray>Level:</gray> <white>" + provider.getActiveMob().getLevel() + "</white>");
-                Msg.send(sender, "  <gray>Power:</gray> <white>" + provider.getActiveMob().getPower() + "</white>");
-            }
-        } else {
+    private void dumpMythicMobStats(CommandSender sender, LivingEntity target, MobStatProvider provider, String filter) {
+        if (!MythicBukkit.inst().getMobManager().isMythicMob(target)) {
             Msg.send(sender, "<gray>(Not a MythicMob)</gray>");
+            return;
+        }
+
+        Msg.send(sender, "<yellow>MythicMob Variables (Stats):</yellow>");
+
+        String[] keys = {
+                "CRITICAL_STRIKE_CHANCE", "CRITICAL_STRIKE_POWER",
+                "ELEMENTAL_CRITICAL_STRIKE_CHANCE", "ELEMENTAL_CRITICAL_STRIKE_POWER",
+                "ADDITIONAL_ELEMENTAL_DAMAGE", "PVP_DAMAGE", "PVE_DAMAGE"
+        };
+
+        boolean foundAny = false;
+        for (String k : keys) {
+            if (!matchesFilter(k, filter)) continue;
+            double val = provider.apply(k);
+            if (val != 0) {
+                Msg.send(sender, "  <green>" + k + "</green>: <white>" + DamageDebug.fmt(val) + "</white>");
+                foundAny = true;
+            }
+        }
+
+        if (!foundAny) {
+            Msg.send(sender, "  <gray>(None of the standard stat variables found)</gray>");
+        }
+
+        dumpMythicMobInfo(sender, provider, filter);
+    }
+
+    private void dumpMythicMobInfo(CommandSender sender, MobStatProvider provider, String filter) {
+        if (provider.getActiveMob() == null || (filter != null && !filter.isEmpty())) {
+            return;
+        }
+
+        Msg.send(sender, "<yellow>MythicMob Info:</yellow>");
+        Msg.send(sender, "  <gray>Type:</gray> <white>" + provider.getActiveMob().getMobType() + "</white>");
+        Msg.send(sender, "  <gray>Level:</gray> <white>" + provider.getActiveMob().getLevel() + "</white>");
+        Msg.send(sender, "  <gray>Power:</gray> <white>" + provider.getActiveMob().getPower() + "</white>");
+    }
+
+    // ----------------------------
+    // Stat modifier commands
+    // ----------------------------
+
+    private boolean handleStat(CommandSender sender, String label, String[] args) {
+        if (!(sender instanceof Player player)) {
+            Msg.send(sender, "<red>Players only.");
+            return true;
+        }
+        if (!sender.hasPermission("devdamagehandler.debug")) {
+            Msg.send(sender, "<red>No permission.");
+            return true;
+        }
+
+        if (args.length < 2) {
+            sendStatUsage(sender, label);
+            return true;
+        }
+
+        String action = args[1].toLowerCase(Locale.ROOT);
+        return switch (action) {
+            case "add" -> handleStatAdd(player, label, args);
+            case "remove" -> handleStatRemove(player, label, args);
+            case "list" -> handleStatList(player, args);
+            default -> {
+                sendStatUsage(sender, label);
+                yield true;
+            }
+        };
+    }
+
+    private boolean handleStatAdd(Player player, String label, String[] args) {
+        // /ddh stat add <modifier name> <stat> <flat/relative> <value> [silent]
+        if (args.length < 6) {
+            sendStatUsage(player, label);
+            return true;
+        }
+
+        String modifierName = args[2];
+        String statName = args[3].toUpperCase(Locale.ROOT);
+        String typeStr = args[4].toUpperCase(Locale.ROOT);
+        Double value = parseDouble(player, args[5], "Value");
+        if (value == null) return true;
+
+        boolean silent = args.length >= 7 && args[6].equalsIgnoreCase("true");
+
+        ModifierType type;
+        try {
+            type = ModifierType.valueOf(typeStr);
+        } catch (IllegalArgumentException e) {
+            Msg.send(player, "<red>Invalid type: " + typeStr + ". Use FLAT or RELATIVE.");
+            return true;
+        }
+
+        MMOPlayerData data = MMOPlayerData.get(player.getUniqueId());
+        String modKey = "ddh_" + modifierName;
+
+        // Remove existing modifier with same key if present
+        StatInstance instance = data.getStatMap().getInstance(statName);
+        removeModifierByKey(instance, modKey);
+
+        StatModifier modifier = new StatModifier(modKey, statName, value, type, EquipmentSlot.OTHER, ModifierSource.OTHER);
+        modifier.register(data);
+
+        if (!silent) {
+            Msg.send(player, "<green>Added stat modifier: <white>" + modKey + " <gray>-> <yellow>" + statName
+                    + " <gray>(" + (type == ModifierType.RELATIVE ? value + "%" : value) + ")");
+        }
+
+        return true;
+    }
+
+    private boolean handleStatRemove(Player player, String label, String[] args) {
+        // /ddh stat remove <modifier name> <stat> [silent]
+        if (args.length < 4) {
+            sendStatUsage(player, label);
+            return true;
+        }
+
+        String modifierName = args[2];
+        String statName = args[3].toUpperCase(Locale.ROOT);
+        boolean silent = args.length >= 5 && args[4].equalsIgnoreCase("true");
+
+        MMOPlayerData data = MMOPlayerData.get(player.getUniqueId());
+        String modKey = "ddh_" + modifierName;
+
+        StatInstance instance = data.getStatMap().getInstance(statName);
+        if (instance.getModifiers().isEmpty()) {
+            if (!silent) Msg.send(player, "<red>No modifiers found on stat: " + statName);
+            return true;
+        }
+
+        boolean removed = removeModifierByKey(instance, modKey);
+        if (!silent) {
+            if (removed) {
+                Msg.send(player, "<green>Removed stat modifier: <white>" + modKey + " <gray>from <yellow>" + statName);
+            } else {
+                Msg.send(player, "<red>Modifier not found: " + modKey + " on stat " + statName);
+            }
+        }
+
+        return true;
+    }
+
+    private boolean handleStatList(Player player, String[] args) {
+        // /ddh stat list <stat>
+        if (args.length < 3) {
+            Msg.send(player, "<yellow>Usage: /ddh stat list <stat>");
+            return true;
+        }
+
+        String statName = args[2].toUpperCase(Locale.ROOT);
+        MMOPlayerData data = MMOPlayerData.get(player.getUniqueId());
+
+        StatInstance instance = data.getStatMap().getInstance(statName);
+        if (instance.getModifiers().isEmpty()) {
+            Msg.send(player, "<yellow>No modifiers found for stat: <white>" + statName);
+            return true;
+        }
+
+        Msg.send(player, "<gold>======= Modifiers for " + statName + " =======");
+        Msg.send(player, "<gray>Total: <white>" + DamageDebug.fmt(instance.getTotal()) + " <gray>(Base: " + DamageDebug.fmt(instance.getBase()) + ")");
+
+        for (StatModifier mod : instance.getModifiers()) {
+            String typeLabel = mod.getType() == ModifierType.RELATIVE ? "%" : "";
+            String valueStr = DamageDebug.fmt(mod.getValue()) + typeLabel;
+            String color = mod.getValue() >= 0 ? "<green>" : "<red>";
+            Msg.send(player, "  " + color + valueStr + " <gray>(" + mod.getKey() + ")");
+        }
+
+        return true;
+    }
+
+    private void sendStatUsage(CommandSender sender, String label) {
+        Msg.send(sender, "<yellow>Usage:</yellow>");
+        Msg.send(sender, "  <yellow>/" + label + " stat add <name> <stat> <flat/relative> <value> [silent]</yellow>");
+        Msg.send(sender, "  <yellow>/" + label + " stat remove <name> <stat> [silent]</yellow>");
+        Msg.send(sender, "  <yellow>/" + label + " stat list <stat></yellow>");
+    }
+
+    private boolean handleTempStat(CommandSender sender, String label, String[] args) {
+        if (!(sender instanceof Player player)) {
+            Msg.send(sender, "<red>Players only.");
+            return true;
+        }
+        if (!sender.hasPermission("devdamagehandler.debug")) {
+            Msg.send(sender, "<red>No permission.");
+            return true;
+        }
+
+        if (args.length < 2) {
+            sendTempStatUsage(sender, label);
+            return true;
+        }
+
+        String action = args[1].toLowerCase(Locale.ROOT);
+        return switch (action) {
+            case "add" -> handleTempStatAdd(player, label, args);
+            case "remove" -> handleTempStatRemove(player, label, args);
+            case "list" -> handleStatList(player, args); // Reuse same list logic
+            default -> {
+                sendTempStatUsage(sender, label);
+                yield true;
+            }
+        };
+    }
+
+    private boolean handleTempStatAdd(Player player, String label, String[] args) {
+        // /ddh tempstat add <modifier name> <stat> <flat/relative> <value> <ticks> [silent]
+        if (args.length < 7) {
+            sendTempStatUsage(player, label);
+            return true;
+        }
+
+        String modifierName = args[2];
+        String statName = args[3].toUpperCase(Locale.ROOT);
+        String typeStr = args[4].toUpperCase(Locale.ROOT);
+        Double value = parseDouble(player, args[5], "Value");
+        if (value == null) return true;
+
+        Long ticks = parseLong(player, args[6], "Ticks");
+        if (ticks == null) return true;
+
+        boolean silent = args.length >= 8 && args[7].equalsIgnoreCase("true");
+
+        ModifierType type;
+        try {
+            type = ModifierType.valueOf(typeStr);
+        } catch (IllegalArgumentException e) {
+            Msg.send(player, "<red>Invalid type: " + typeStr + ". Use FLAT or RELATIVE.");
+            return true;
+        }
+
+        MMOPlayerData data = MMOPlayerData.get(player.getUniqueId());
+        String modKey = "ddh_" + modifierName;
+
+        // Remove existing modifier with same key if present
+        StatInstance instance = data.getStatMap().getInstance(statName);
+        removeModifierByKey(instance, modKey);
+
+        TemporaryStatModifier modifier = new TemporaryStatModifier(
+                modKey, statName, value, type, EquipmentSlot.OTHER, ModifierSource.OTHER
+        );
+        modifier.register(data, ticks);
+
+        if (!silent) {
+            String typeLabel = type == ModifierType.RELATIVE ? "%" : "";
+            Msg.send(player, "<green>Added temp stat modifier: <white>" + modKey + " <gray>-> <yellow>" + statName
+                    + " <gray>(" + value + typeLabel + " for " + ticks + " ticks)");
+        }
+
+        return true;
+    }
+
+    private boolean handleTempStatRemove(Player player, String label, String[] args) {
+        // /ddh tempstat remove <modifier name> <stat> [silent]
+        // Same as stat remove - temp modifiers are stored in the same StatInstance
+        return handleStatRemove(player, label, args);
+    }
+
+    private void sendTempStatUsage(CommandSender sender, String label) {
+        Msg.send(sender, "<yellow>Usage:</yellow>");
+        Msg.send(sender, "  <yellow>/" + label + " tempstat add <name> <stat> <flat/relative> <value> <ticks> [silent]</yellow>");
+        Msg.send(sender, "  <yellow>/" + label + " tempstat remove <name> <stat> [silent]</yellow>");
+        Msg.send(sender, "  <yellow>/" + label + " tempstat list <stat></yellow>");
+    }
+
+    /**
+     * Helper to remove a modifier by its key from a StatInstance.
+     * Returns true if any modifier was removed.
+     */
+    private boolean removeModifierByKey(StatInstance instance, String modKey) {
+        if (instance == null) return false;
+
+        List<UUID> toRemove = new ArrayList<>();
+        for (StatModifier mod : instance.getModifiers()) {
+            if (mod.getKey().equals(modKey)) {
+                toRemove.add(mod.getUniqueId());
+            }
+        }
+
+        for (UUID uuid : toRemove) {
+            try {
+                instance.removeModifier(uuid);
+            } catch (Exception ignored) {
+                // Modifier may have already been removed
+            }
+        }
+
+        return !toRemove.isEmpty();
+    }
+
+    private Long parseLong(CommandSender sender, String raw, String fieldName) {
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException e) {
+            Msg.send(sender, "<red>Invalid " + fieldName + ": " + raw);
+            return null;
         }
     }
 
@@ -510,12 +793,14 @@ public final class DevDHCommandExecutor implements CommandExecutor {
                 <yellow>/%s debug [on|off|toggle] [player]</yellow> <gray>- toggle damage debug mode</gray>
                 <yellow>/%s damage <att> <vic> <amt> <types> <elems></yellow> <gray>- debug damage</gray>
                 <yellow>/%s stats [player] [stat]</yellow> <gray>- dump player stats (can filter)</gray>
+                <yellow>/%s stat <add|remove|list> ...</yellow> <gray>- manage stat modifiers</gray>
+                <yellow>/%s tempstat <add|remove|list> ...</yellow> <gray>- manage temp stat modifiers</gray>
                 
                 <gray>When debug is ON, attacking mobs shows:</gray>
                 <gray>- Raw damage packets</gray>
                 <gray>- Element values and multipliers</gray>
                 <gray>- MythicMobs DamageModifiers</gray>
                 <gray>- Final calculated damage</gray>
-                """.formatted(label, label, label, label));
+                """.formatted(label, label, label, label, label, label));
     }
 }

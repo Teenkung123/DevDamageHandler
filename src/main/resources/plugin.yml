@@ -9,6 +9,7 @@ softdepend:
   - eco
   - libreforge
   - EcoEnchants
+  - HologramLib
 
 commands:
   ddh:

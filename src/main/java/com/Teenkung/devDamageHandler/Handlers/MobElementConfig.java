@@ -73,42 +73,55 @@ public class MobElementConfig {
             return DEFAULT;
         }
         
+        Element foundElement = findPrimaryElement(rawMods);
+        DamageType foundType = findPrimaryType(rawMods);
+
+        return new MobElementConfig(foundElement, foundType);
+    }
+
+    private static Element findPrimaryElement(Map<String, Double> rawMods) {
         Element foundElement = null;
-        DamageType foundType = DamageType.PHYSICAL;
         double lowestElementValue = Double.MAX_VALUE;
         
         for (Map.Entry<String, Double> entry : rawMods.entrySet()) {
             String key = DamageMechanics.normalizeKey(entry.getKey());
             double value = entry.getValue();
             
-            // Check for element keys (ELEMENT_FIRE, ELEMENT_ICE, etc.)
-            if (key.startsWith("ELEMENT_")) {
-                String elemName = key.substring("ELEMENT_".length());
-                if (elemName.equalsIgnoreCase("NONE")) continue;
-                
-                // Mob is IMMUNE (0.0) or has strong resist = likely its element
-                if (value < lowestElementValue) {
-                    lowestElementValue = value;
-                    Element elem = findElement(elemName);
-                    if (elem != null) {
-                        foundElement = elem;
-                    }
-                }
-            }
-            
-            // Check for type keys (TYPE_MAGIC, TYPE_SKILL, etc.)
-            if (key.startsWith("TYPE_")) {
-                String typeName = key.substring("TYPE_".length());
-                // Similar logic: immunity or strong resist suggests this is the mob's type
-                if (value <= 0.5) {
-                    try {
-                        foundType = DamageType.valueOf(typeName.toUpperCase());
-                    } catch (IllegalArgumentException ignored) {}
+            if (!key.startsWith("ELEMENT_")) continue;
+
+            String elemName = key.substring("ELEMENT_".length());
+            if (elemName.equalsIgnoreCase("NONE")) continue;
+
+            // Mob is IMMUNE (0.0) or has strong resist = likely its element
+            if (value < lowestElementValue) {
+                lowestElementValue = value;
+                Element elem = findElement(elemName);
+                if (elem != null) {
+                    foundElement = elem;
                 }
             }
         }
+
+        return foundElement;
+    }
+
+    private static DamageType findPrimaryType(Map<String, Double> rawMods) {
+        for (Map.Entry<String, Double> entry : rawMods.entrySet()) {
+            String key = DamageMechanics.normalizeKey(entry.getKey());
+            double value = entry.getValue();
+
+            if (!key.startsWith("TYPE_")) continue;
+
+            String typeName = key.substring("TYPE_".length());
+            // Immunity or strong resist suggests this is the mob's type
+            if (value <= 0.5) {
+                try {
+                    return DamageType.valueOf(typeName.toUpperCase());
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
         
-        return new MobElementConfig(foundElement, foundType);
+        return DamageType.PHYSICAL;
     }
     
     /**

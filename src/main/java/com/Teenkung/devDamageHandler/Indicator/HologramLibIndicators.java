@@ -12,7 +12,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.util.Vector;
 
 import java.text.DecimalFormat;
 import java.util.*;
@@ -71,92 +70,112 @@ public class HologramLibIndicators {
     private String renderLine(IndicatorLine l) {
         // 1) IMMUNE
         if (l.immune) {
-            final double EPS = 1e-6;
-            boolean elementImmune = l.element != null && l.mobMul != null && Math.abs(l.mobMul) < EPS;
-            boolean typeImmune = !elementImmune;
-
-            String icon = l.iconOverride;
-            if (icon == null || icon.isEmpty()) {
-                if (typeImmune && l.types != null && !l.types.isEmpty()) {
-                    icon = settings.iconFor(l.types, false);
-                } else if (elementImmune && l.element != null) {
-                    icon = buildElementIcon(l.element, false);
-                } else {
-                    icon = settings.defaultIconNormal;
-                }
-            }
-
-            String immune = settings.immuneText.replace("{icon}", safe(icon));
-            // HologramLib uses MiniMessage - don't convert to legacy codes
-            return immune;
+            return renderImmuneLine(l);
         }
 
-        // 2) Arrow
-        String arrow = "";
-        double mobMul = (l.mobMul == null ? 1.0 : l.mobMul);
-        if (mobMul > 1.0001) arrow = settings.arrowUp;
-        else if (mobMul < 0.9999) arrow = settings.arrowDown;
+        // 2) Arrow based on mob multiplier
+        String arrow = buildArrow(l.mobMul);
 
         // 3) Icon
-        String icon = (l.iconOverride == null || l.iconOverride.isEmpty()) ? null : l.iconOverride;
-
-        if (icon == null) {
-            List<String> parts = new ArrayList<>();
-            for (IndicatorSettings.IconOrder ord : settings.iconOrder) {
-                switch (ord) {
-                    case ELEMENT -> {
-                        if (l.element != null) {
-                            parts.add(buildElementIcon(l.element, l.crit));
-                        }
-                    }
-                    case TYPES -> {
-                        if (settings.showBothWhenElement || l.element == null) {
-                            Set<DamageType> filtered = Collections.emptySet();
-                            if (l.types != null && !l.types.isEmpty()) {
-                                if (l.element != null && settings.stripPhysicalWhenElement) {
-                                    filtered = EnumSet.copyOf(l.types);
-                                    filtered.remove(DamageType.PHYSICAL);
-                                } else {
-                                    filtered = l.types;
-                                }
-                            }
-
-                            List<String> typeIcons = new ArrayList<>(settings.iconListFor(filtered, l.crit));
-
-                            if (l.skillCrit && !settings.skillCritIcon.isEmpty()) {
-                                if (!typeIcons.isEmpty()) {
-                                    typeIcons.set(0, settings.skillCritIcon + typeIcons.get(0));
-                                } else {
-                                    typeIcons.add(settings.skillCritIcon);
-                                }
-                            }
-                            parts.addAll(typeIcons);
-                        }
-                    }
-                }
-            }
-            
-            // Fallback
-            if (parts.isEmpty()) {
-                String def = l.crit ? settings.defaultIconCrit : settings.defaultIconNormal;
-                if (!def.isEmpty()) parts.add(def);
-            }
-            
-            icon = settings.joinIcons(parts);
-        }
+        String icon = buildIcon(l);
 
         // 4) Number
         String plain = formatter.format(l.value);
         String number = (font != null && font.isEnabled()) ? font.encodeString(plain, l.crit) : plain;
 
-        // 5) Compose
-        String mini = settings.lineFormat
+        // 5) Compose - HologramLib uses MiniMessage, no legacy code conversion needed
+        return settings.lineFormat
                 .replace("{arrow}", arrow)
                 .replace("{icon}", safe(icon))
                 .replace("{value}", number);
+    }
 
-        // HologramLib uses MiniMessage - don't convert to legacy codes
-        return mini;
+    private String renderImmuneLine(IndicatorLine l) {
+        final double EPS = 1e-6;
+        boolean elementImmune = l.element != null && l.mobMul != null && Math.abs(l.mobMul) < EPS;
+        boolean typeImmune = !elementImmune;
+
+        String icon = l.iconOverride;
+        if (icon == null || icon.isEmpty()) {
+            icon = resolveImmuneIcon(l, elementImmune, typeImmune);
+        }
+
+        return settings.immuneText.replace("{icon}", safe(icon));
+    }
+
+    private String resolveImmuneIcon(IndicatorLine l, boolean elementImmune, boolean typeImmune) {
+        if (typeImmune && l.types != null && !l.types.isEmpty()) {
+            return settings.iconFor(l.types, false);
+        }
+        if (elementImmune && l.element != null) {
+            return buildElementIcon(l.element, false);
+        }
+        return settings.defaultIconNormal;
+    }
+
+    private String buildArrow(Double mobMul) {
+        double mul = (mobMul == null ? 1.0 : mobMul);
+        if (mul > 1.0001) return settings.arrowUp;
+        if (mul < 0.9999) return settings.arrowDown;
+        return "";
+    }
+
+    private String buildIcon(IndicatorLine l) {
+        if (l.iconOverride != null && !l.iconOverride.isEmpty()) {
+            return l.iconOverride;
+        }
+
+        List<String> parts = new ArrayList<>();
+        for (IndicatorSettings.IconOrder ord : settings.iconOrder) {
+            switch (ord) {
+                case ELEMENT -> addElementIconPart(l, parts);
+                case TYPES -> addTypeIconParts(l, parts);
+            }
+        }
+
+        // Fallback to default icon
+        if (parts.isEmpty()) {
+            String def = l.crit ? settings.defaultIconCrit : settings.defaultIconNormal;
+            if (!def.isEmpty()) parts.add(def);
+        }
+
+        return settings.joinIcons(parts);
+    }
+
+    private void addElementIconPart(IndicatorLine l, List<String> parts) {
+        if (l.element != null) {
+            parts.add(buildElementIcon(l.element, l.crit));
+        }
+    }
+
+    private void addTypeIconParts(IndicatorLine l, List<String> parts) {
+        if (!settings.showBothWhenElement && l.element != null) {
+            return;
+        }
+
+        Set<DamageType> filtered = getFilteredTypes(l);
+        List<String> typeIcons = new ArrayList<>(settings.iconListFor(filtered, l.crit));
+
+        if (l.skillCrit && !settings.skillCritIcon.isEmpty()) {
+            if (!typeIcons.isEmpty()) {
+                typeIcons.set(0, settings.skillCritIcon + typeIcons.get(0));
+            } else {
+                typeIcons.add(settings.skillCritIcon);
+            }
+        }
+        parts.addAll(typeIcons);
+    }
+
+    private Set<DamageType> getFilteredTypes(IndicatorLine l) {
+        if (l.types == null || l.types.isEmpty()) {
+            return Collections.emptySet();
+        }
+        if (l.element != null && settings.stripPhysicalWhenElement) {
+            Set<DamageType> filtered = EnumSet.copyOf(l.types);
+            filtered.remove(DamageType.PHYSICAL);
+            return filtered;
+        }
+        return l.types;
     }
 
     private String buildElementIcon(Element element, boolean crit) {
