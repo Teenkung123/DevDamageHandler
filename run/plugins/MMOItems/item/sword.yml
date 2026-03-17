@@ -1,4 +1,0 @@
-TEST:
-  base:
-    material: IRON_SWORD
-    elemental-damage: 30.0

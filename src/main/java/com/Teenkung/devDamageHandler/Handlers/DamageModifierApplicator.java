@@ -1,6 +1,5 @@
 package com.Teenkung.devDamageHandler.Handlers;
 
-import com.Teenkung.devDamageHandler.Util.Msg;
 import io.lumine.mythic.lib.damage.DamageMetadata;
 import io.lumine.mythic.lib.damage.DamagePacket;
 import io.lumine.mythic.lib.damage.DamageType;
@@ -8,7 +7,7 @@ import io.lumine.mythic.lib.element.Element;
 
 import java.util.*;
 
-import static com.Teenkung.devDamageHandler.Handlers.DamageDebug.fmt;
+
 
 /**
  * Handles the calculation of damage modifiers.
@@ -18,21 +17,19 @@ public class DamageModifierApplicator {
     
     private static final double EPS = 1e-6;
     
-    private final boolean debug;
     private final java.util.function.Function<String, Double> statProvider;
-    private final org.bukkit.command.CommandSender debugSender;
     private final DamageMetadata dmg;
     private final Map<String, Double> mmMods;
+    private final DebugReport report; // null when debug is disabled
     
     public DamageModifierApplicator(java.util.function.Function<String, Double> statProvider, 
-                                   org.bukkit.command.CommandSender debugSender,
                                    DamageMetadata dmg, 
-                                   Map<String, Double> mmMods, boolean debug) {
+                                   Map<String, Double> mmMods,
+                                   DebugReport report) {
         this.statProvider = statProvider;
-        this.debugSender = debugSender;
         this.dmg = dmg;
         this.mmMods = mmMods;
-        this.debug = debug;
+        this.report = report;
     }
     
     /**
@@ -49,12 +46,8 @@ public class DamageModifierApplicator {
             double typeMul = DamageMechanics.lookupTypeMultiplier(mmMods, type);
             typeMultipliers.put(type, typeMul);
             
-            if (debug) {
-                String color = typeMul < 1.0 ? "<green>" : (typeMul > 1.0 ? "<red>" : "<white>");
-                String colorEnd = typeMul < 1.0 ? "</green>" : (typeMul > 1.0 ? "</red>" : "</white>");
-                String result = typeMul < 0.01 ? "IMMUNE" : "×" + fmt(typeMul);
-                Msg.send(debugSender, 
-                    "<gray>TYPE_</gray><white>" + type + "</white><gray>:</gray> " + color + result + colorEnd);
+            if (report != null) {
+                report.addTypeModifier(type.name(), typeMul);
             }
         }
         
@@ -116,10 +109,7 @@ public class DamageModifierApplicator {
             }
             
             // Get attacker's offense stats for this element
-            // {ELEMENT}_DAMAGE_PERCENT: percentage multiplier bonus
             double elemDamagePercent = statProvider.apply(elId + "_DAMAGE_PERCENT");
-            
-            // ADDITIONAL_ELEMENTAL_DAMAGE: generic bonus to all elements
             double bonusElem = statProvider.apply("ADDITIONAL_ELEMENTAL_DAMAGE");
             
             // Combine percentage bonuses only
@@ -131,39 +121,9 @@ public class DamageModifierApplicator {
             
             totalMultipliers.put(el, finalMul);
 
-            if (debug) {
-                StringBuilder sb = new StringBuilder();
-                sb.append("<gray>┌─ </gray><aqua>").append(elId).append("</aqua><gray> ─┐</gray>\n");
-                sb.append("<gray>│</gray> <yellow>Base:</yellow> <white>").append(fmt(elemRaw.get(el))).append("</white>\n");
-                
-                // Show defense multiplier with color
-                String defColor = elemMul < 1.0 ? "<green>" : (elemMul > 1.0 ? "<red>" : "<white>");
-                String defEnd = elemMul < 1.0 ? "</green>" : (elemMul > 1.0 ? "</red>" : "</white>");
-                double defReduction = (1.0 - elemMul) * 100;
-                sb.append("<gray>│</gray> <yellow>Def Mul:</yellow> ").append(defColor).append("×").append(fmt(elemMul));
-                if (Math.abs(defReduction) > EPS) {
-                    sb.append(" (").append(defReduction > 0 ? "-" : "+").append(fmt(Math.abs(defReduction))).append("%)");
-                }
-                sb.append(defEnd).append("\n");
-                
-                // Show attacker offense bonuses (only percentage-based stats)
-                if (elemDamagePercent > EPS || bonusElem > EPS) {
-                    sb.append("<gray>│</gray> <yellow>Offense:</yellow>");
-                    if (elemDamagePercent > EPS) {
-                        sb.append(" <white>+").append(fmt(elemDamagePercent)).append("% ").append(elId).append("</white>");
-                    }
-                    if (bonusElem > EPS) {
-                        sb.append(" <white>+").append(fmt(bonusElem)).append("% ALL</white>");
-                    }
-                    sb.append("\n");
-                }
-                
-                // Show final calculated damage
-                double finalElemDmg = elemRaw.get(el) * elemMul; // Note: indicator raw shows Defense effect
-                sb.append("<gray>│</gray> <yellow>Final:</yellow> <green>").append(fmt(finalElemDmg)).append("</green>\n");
-                sb.append("<gray>└────────────────────┘</gray>");
-                
-                Msg.send(debugSender, sb.toString());
+            if (report != null) {
+                double finalElemDmg = elemRaw.get(el) * elemMul;
+                report.addElementModifier(elId, elemRaw.get(el), elemMul, elemDamagePercent, bonusElem, finalElemDmg);
             }
         }
         
@@ -191,8 +151,6 @@ public class DamageModifierApplicator {
     public Map<DamageType, Double> getStatMultipliers(Set<DamageType> activeTypes) {
         Map<DamageType, Double> statMults = new EnumMap<>(DamageType.class);
         for (DamageType type : activeTypes) {
-             // Stat format: SKILL_DAMAGE, PHYSICAL_DAMAGE (as per user report)
-             // We also check ADDITIONAL_SKILL_DAMAGE as legacy fallback or for consistency with Element stats
              double val = statProvider.apply(type.name() + "_DAMAGE");
              if (val <= EPS) {
                  val = statProvider.apply("ADDITIONAL_" + type.name() + "_DAMAGE");
@@ -200,8 +158,8 @@ public class DamageModifierApplicator {
              
              if (val > EPS) {
                  statMults.put(type, 1.0 + (val / 100.0));
-                 if (debug) {
-                     Msg.send(debugSender, "<gray>Stat Bonus <white>" + type + "</white>: +" + fmt(val) + "%</gray>");
+                 if (report != null) {
+                     report.addStatBonus(type.name(), val);
                  }
              }
         }
@@ -217,10 +175,8 @@ public class DamageModifierApplicator {
         if (nonElemDamage > EPS) {
             nonElemMul = DamageMechanics.lookupElementMultiplier(mmMods, "NONE");
             
-            if (debug) {
-                Msg.send(debugSender, 
-                    "<gray>ELEMENT_NONE: base=<white>" + fmt(nonElemDamage) + 
-                    "</white> mul=<white>" + fmt(nonElemMul) + "</white>");
+            if (report != null) {
+                report.setNoneElement(nonElemDamage, nonElemMul);
             }
         }
         return nonElemMul;
@@ -283,9 +239,8 @@ public class DamageModifierApplicator {
                 accumulatedPower += weaponCritPower;
                 isNonElemCrit = true;
                 
-                if (debug) {
-                    Msg.send(debugSender, 
-                        "<gold>⚔ WEAPON CRIT!</gold> <gray>+</gray><white>" + fmt(weaponCritPower) + "% power</white>");
+                if (report != null) {
+                    report.addCritResult("WEAPON", "⚔", weaponCritPower);
                 }
             }
         }
@@ -298,9 +253,8 @@ public class DamageModifierApplicator {
                 accumulatedPower += skillCritPower;
                 isNonElemCrit = true;
                 
-                if (debug) {
-                    Msg.send(debugSender, 
-                        "<gold>★ SKILL CRIT!</gold> <gray>+</gray><white>" + fmt(skillCritPower) + "% power</white>");
+                if (report != null) {
+                    report.addCritResult("SKILL", "★", skillCritPower);
                 }
             }
         }
@@ -309,10 +263,8 @@ public class DamageModifierApplicator {
         if (accumulatedPower > 0) {
             nonElemCritMul = 1.0 + (accumulatedPower / 100.0);
             
-            if (debug && triggered.size() > 1) {
-                Msg.send(debugSender, 
-                    "<aqua>⚡ STACKED CRIT!</aqua> <white>Total power: " + fmt(accumulatedPower) + 
-                    "% = x" + fmt(nonElemCritMul) + "</white>");
+            if (report != null && triggered.size() > 1) {
+                report.setStackedCrit(accumulatedPower, nonElemCritMul);
             }
         }
         
@@ -329,10 +281,8 @@ public class DamageModifierApplicator {
                 triggered.add(CritType.ELEMENTAL);
                 isElemCrit = true;
                 
-                if (debug) {
-                    Msg.send(debugSender, 
-                        "<gold>✦ ELEMENTAL CRIT!</gold> <aqua>" + el.getId() + 
-                        "</aqua> <gray>+</gray><white>" + fmt(elemCritPower) + "% power</white>");
+                if (report != null) {
+                    report.addCritResult("ELEMENTAL (" + el.getId() + ")", "✦", elemCritPower);
                 }
             }
             
@@ -341,10 +291,8 @@ public class DamageModifierApplicator {
                 elemAccumulatedPower += skillCritPower;
                 elemTriggered.add(CritType.SKILL);
                 
-                if (debug && elemTriggered.contains(CritType.ELEMENTAL)) {
-                    Msg.send(debugSender, 
-                        "<aqua>⚡ STACKED!</aqua> <white>SKILL + ELEMENTAL: +" + 
-                        fmt(skillCritPower) + "% added</white>");
+                if (report != null && elemTriggered.contains(CritType.ELEMENTAL)) {
+                    report.addCritResult("STACKED (" + el.getId() + ")", "⚡", skillCritPower);
                 }
             }
             
@@ -352,9 +300,8 @@ public class DamageModifierApplicator {
                 double elemCritMul = 1.0 + (elemAccumulatedPower / 100.0);
                 elemCritMults.put(el, elemCritMul);
                 
-                if (debug && elemTriggered.size() > 1) {
-                    Msg.send(debugSender, 
-                        "<aqua>" + el.getId() + " Total:</aqua> <white>x" + fmt(elemCritMul) + "</white>");
+                if (report != null && elemTriggered.size() > 1) {
+                    report.setStackedCrit(elemAccumulatedPower, elemCritMul);
                 }
             }
         }

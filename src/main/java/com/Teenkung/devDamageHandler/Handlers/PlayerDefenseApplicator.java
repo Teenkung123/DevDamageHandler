@@ -1,10 +1,10 @@
 package com.Teenkung.devDamageHandler.Handlers;
 
-import com.Teenkung.devDamageHandler.Util.Msg;
+
 import io.lumine.mythic.lib.api.player.MMOPlayerData;
 import io.lumine.mythic.lib.damage.DamageMetadata;
 import io.lumine.mythic.lib.damage.DamageType;
-import org.bukkit.command.CommandSender;
+
 import org.bukkit.entity.Player;
 
 
@@ -40,12 +40,14 @@ public class PlayerDefenseApplicator {
      * @param dmg The damage metadata to modify
      * @param mobConfig The mob's element config (for element/type-specific defense)
      * @param originalDamage The original damage BEFORE any other modifiers were applied
-     * @param debug Whether to print debug info
-     * @param debugRecipient Who to send debug info to
+     * @param config The defense formula config
+     * @param isPvp Whether the attacker is a player (PVP context)
+     * @param report DebugReport to collect data into (null if debug disabled)
      * @return DefenseResult with details of what was applied
      */
     public static DefenseResult applyDefense(Player player, DamageMetadata dmg, 
-            MobElementConfig mobConfig, double originalDamage, boolean debug, CommandSender debugRecipient) {
+            MobElementConfig mobConfig, double originalDamage, DamageConfig config,
+            boolean isPvp, DebugReport report) {
         
         MMOPlayerData data = MMOPlayerData.get(player.getUniqueId());
         if (data == null) {
@@ -58,10 +60,11 @@ public class PlayerDefenseApplicator {
         }
 
         // Gather all defense stats
-        DefenseStats stats = gatherDefenseStats(data, mobConfig);
+        DefenseStats stats = gatherDefenseStats(data, mobConfig, isPvp);
+        DamageConfig defenseConfig = config != null ? config : new DamageConfig();
 
         // Calculate multipliers
-        MultiplierResult multipliers = calculateMultipliers(stats);
+        MultiplierResult multipliers = calculateMultipliers(stats, baseDamage, defenseConfig);
 
         // Apply to damage metadata
         if (Math.abs(multipliers.total - 1.0) > EPS) {
@@ -70,9 +73,9 @@ public class PlayerDefenseApplicator {
 
         double finalDamage = baseDamage * multipliers.total;
 
-        // Debug output
-        if (debug && debugRecipient != null) {
-            printDefenseDebug(debugRecipient, stats, multipliers, baseDamage, finalDamage);
+        // Collect debug data
+        if (report != null) {
+            report.setPlayerDefense(stats, multipliers, baseDamage, finalDamage);
         }
 
         return new DefenseResult(multipliers.total, baseDamage, finalDamage);
@@ -80,10 +83,11 @@ public class PlayerDefenseApplicator {
 
     // --- Helper records and methods ---
 
-    private record DefenseStats(
+    static record DefenseStats(
         double defense,
         double damageReduction,
-        double pveReduction,
+        String contextReductionId,
+        double contextReduction,
         String elementId,
         double elementDefense,
         double elementDefensePercent,
@@ -92,17 +96,18 @@ public class PlayerDefenseApplicator {
         double typeReduction
     ) {}
 
-    private record MultiplierResult(
+    static record MultiplierResult(
         double weakness,
         double defense,
         double reduction,
         double total
     ) {}
 
-    private static DefenseStats gatherDefenseStats(MMOPlayerData data, MobElementConfig mobConfig) {
+    private static DefenseStats gatherDefenseStats(MMOPlayerData data, MobElementConfig mobConfig, boolean isPvp) {
         double defense = data.getStatMap().getStat("DEFENSE");
         double damageReduction = data.getStatMap().getStat("DAMAGE_REDUCTION");
-        double pveReduction = data.getStatMap().getStat("PVE_DAMAGE_REDUCTION");
+        String contextReductionId = isPvp ? "PVP_DAMAGE_REDUCTION" : "PVE_DAMAGE_REDUCTION";
+        double contextReduction = data.getStatMap().getStat(contextReductionId);
         
         // Element-specific stats
         String elementId = null;
@@ -127,7 +132,7 @@ public class PlayerDefenseApplicator {
             typeReduction = getTypeReduction(data, primaryType);
         }
 
-        return new DefenseStats(defense, damageReduction, pveReduction,
+        return new DefenseStats(defense, damageReduction, contextReductionId, contextReduction,
                                elementId, elementDefense, elementDefensePercent, elementWeakness,
                                typeId, typeReduction);
     }
@@ -141,23 +146,25 @@ public class PlayerDefenseApplicator {
         };
     }
 
-    private static MultiplierResult calculateMultipliers(DefenseStats stats) {
+    private static MultiplierResult calculateMultipliers(DefenseStats stats, double baseDamage, DamageConfig config) {
         // 1. Apply WEAKNESS first (increases damage taken)
         double weaknessMultiplier = 1.0;
         if (stats.elementWeakness > EPS) {
-            weaknessMultiplier = 1.0 + (stats.elementWeakness / 100.0);
+            weaknessMultiplier = config.calculateWeaknessMultiplier(stats.elementWeakness);
         }
         
-        // 2. Apply DEFENSE formula: damage * (1 - (defense / (defense + 100)))
+        // 2. Apply flat defense formula from config to (DEFENSE + {ELEMENT}_DEFENSE)
         double totalDefense = stats.defense + stats.elementDefense;
         double defenseMultiplier = 1.0;
-        if (totalDefense > EPS) {
-            defenseMultiplier = 1.0 - (totalDefense / (totalDefense + 100.0));
+        double afterWeakness = baseDamage * weaknessMultiplier;
+        if (totalDefense > EPS && afterWeakness > EPS) {
+            double afterFlatDefense = config.applyFlatDefense(afterWeakness, totalDefense);
+            defenseMultiplier = afterFlatDefense / afterWeakness;
             defenseMultiplier = Math.max(0.0, Math.min(1.0, defenseMultiplier));
         }
         
         // 3. Apply percentage-based reductions (geometric stacking)
-        double reductionMultiplier = calculateReductionMultiplier(stats);
+        double reductionMultiplier = calculateReductionMultiplier(stats, config);
 
         // Combined multiplier
         double totalMultiplier = weaknessMultiplier * defenseMultiplier * reductionMultiplier;
@@ -166,87 +173,27 @@ public class PlayerDefenseApplicator {
         return new MultiplierResult(weaknessMultiplier, defenseMultiplier, reductionMultiplier, totalMultiplier);
     }
 
-    private static double calculateReductionMultiplier(DefenseStats stats) {
+    private static double calculateReductionMultiplier(DefenseStats stats, DamageConfig config) {
         double multiplier = 1.0;
 
         if (stats.damageReduction > EPS) {
-            multiplier *= (1.0 - Math.min(stats.damageReduction, 99.0) / 100.0);
+            multiplier *= config.calculatePercentDefenseMultiplier(stats.damageReduction);
         }
         if (stats.elementDefensePercent > EPS) {
-            multiplier *= (1.0 - Math.min(stats.elementDefensePercent, 99.0) / 100.0);
+            multiplier *= config.calculatePercentDefenseMultiplier(stats.elementDefensePercent);
         }
-        if (stats.pveReduction > EPS) {
-            multiplier *= (1.0 - Math.min(stats.pveReduction, 99.0) / 100.0);
+        if (stats.contextReduction > EPS) {
+            multiplier *= config.calculatePercentDefenseMultiplier(stats.contextReduction);
         }
         if (stats.typeReduction > EPS) {
-            multiplier *= (1.0 - Math.min(stats.typeReduction, 99.0) / 100.0);
+            multiplier *= config.calculatePercentDefenseMultiplier(stats.typeReduction);
         }
 
         return multiplier;
     }
 
-    private static void printDefenseDebug(CommandSender recipient, DefenseStats stats,
-                                          MultiplierResult multipliers, double baseDamage, double finalDamage) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("\n<yellow>Player Defense Stats:</yellow>\n");
-        
-        // Weakness (if any)
-        if (stats.elementWeakness > EPS) {
-            sb.append("  <red>").append(stats.elementId).append("_WEAKNESS:</red> <white>+")
-              .append(fmt(stats.elementWeakness)).append("%</white>");
-            sb.append(" <gray>→ mul:</gray> <red>").append(fmt(multipliers.weakness * 100)).append("%</red>\n");
-        }
-        
-        // Defense (flat)
-        sb.append("  <gray>DEFENSE:</gray> <white>").append(fmt(stats.defense)).append("</white>");
-        if (stats.elementDefense > EPS) {
-            sb.append(" <gray>+ ").append(stats.elementId).append("_DEFENSE:</gray> <white>")
-              .append(fmt(stats.elementDefense)).append("</white>");
-        }
-        sb.append(" <gray>→ mul:</gray> <aqua>").append(fmt(multipliers.defense * 100)).append("%</aqua>\n");
 
-        // Reductions (percent)
-        appendReductionsDebug(sb, stats, multipliers);
 
-        // Final
-        sb.append("  <gray>Combined:</gray> <aqua>").append(fmt(multipliers.total * 100)).append("%</aqua>\n");
-        sb.append("  <gray>Damage:</gray> <white>").append(fmt(baseDamage)).append("</white> <gray>→</gray> <green>")
-          .append(fmt(finalDamage)).append("</green>");
-
-        Msg.send(recipient, sb.toString());
-    }
-
-    private static void appendReductionsDebug(StringBuilder sb, DefenseStats stats, MultiplierResult multipliers) {
-        sb.append("  <gray>Reductions:</gray>");
-        boolean hasReductions = false;
-        
-        if (stats.damageReduction > EPS) {
-            sb.append(" <white>DR:").append(fmt(stats.damageReduction)).append("%</white>");
-            hasReductions = true;
-        }
-        if (stats.elementDefensePercent > EPS) {
-            sb.append(" <white>").append(stats.elementId).append("_DEF%:")
-              .append(fmt(stats.elementDefensePercent)).append("%</white>");
-            hasReductions = true;
-        }
-        if (stats.pveReduction > EPS) {
-            sb.append(" <white>PVE:").append(fmt(stats.pveReduction)).append("%</white>");
-            hasReductions = true;
-        }
-        if (stats.typeReduction > EPS) {
-            sb.append(" <white>").append(stats.typeId).append(":").append(fmt(stats.typeReduction)).append("%</white>");
-            hasReductions = true;
-        }
-        
-        if (!hasReductions) {
-            sb.append(" <gray>none</gray>");
-        }
-        sb.append(" <gray>→ mul:</gray> <aqua>").append(fmt(multipliers.reduction * 100)).append("%</aqua>\n");
-    }
-    
-    private static String fmt(double d) {
-        return DamageDebug.fmt(d);
-    }
     
     /**
      * Result of defense application for tracking/display.

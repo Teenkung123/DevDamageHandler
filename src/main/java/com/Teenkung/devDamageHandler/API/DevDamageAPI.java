@@ -1,19 +1,21 @@
 package com.Teenkung.devDamageHandler.API;
 
 import com.Teenkung.devDamageHandler.DevDamageHandler;
-import io.lumine.mythic.lib.MythicLib;
 import io.lumine.mythic.lib.api.player.MMOPlayerData;
 import io.lumine.mythic.lib.damage.DamageMetadata;
 import io.lumine.mythic.lib.damage.DamageType;
 import io.lumine.mythic.lib.element.Element;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Public API for DevDamageHandler.
@@ -195,7 +197,7 @@ public final class DevDamageAPI {
      * @return The Element, or empty if not found
      */
     public @NotNull Optional<Element> getElement(@NotNull String elementId) {
-        return Optional.of(MythicLib.plugin.getElements().get(elementId));
+        return Optional.ofNullable(io.lumine.mythic.lib.MythicLib.plugin.getElements().get(elementId));
     }
 
     /**
@@ -203,7 +205,7 @@ public final class DevDamageAPI {
      * @return Collection of all registered Elements
      */
     public @NotNull Collection<Element> getAllElements() {
-        return MythicLib.plugin.getElements().getAll();
+        return io.lumine.mythic.lib.MythicLib.plugin.getElements().getAll();
     }
 
     /* ========== Internal - Called by plugin ========== */

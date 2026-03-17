@@ -30,6 +30,9 @@ repositories {
     }
     maven { url  = 'https://repo.extendedclip.com/content/repositories/placeholderapi/' }
     maven { url = "https://repo.auxilor.io/repository/maven-public/" }
+    maven {
+        url = 'https://repo.helpch.at/releases'
+    }
 }
 
 dependencies {
@@ -42,6 +45,7 @@ dependencies {
     compileOnly("com.willfp:libreforge:4.79.0")
     compileOnly("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
     compileOnly fileTree(dir: 'libs', include: ['*.jar'])
+    compileOnly 'me.clip:placeholderapi:2.12.2'
     
     // Test dependencies
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'

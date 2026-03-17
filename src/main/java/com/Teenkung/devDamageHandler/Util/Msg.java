@@ -9,7 +9,9 @@ public final class Msg {
     private Msg() {}
 
     public static void send(CommandSender sender, String mini) {
-        Component c = MM.deserialize(mini);
+        // Strip any legacy formatting codes (§x) before MiniMessage parsing
+        String clean = mini.replaceAll("§[0-9a-fk-orA-FK-OR]", "");
+        Component c = MM.deserialize(clean);
         sender.sendMessage(c);
     }
 }

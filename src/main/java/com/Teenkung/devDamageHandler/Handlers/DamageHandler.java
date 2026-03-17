@@ -8,6 +8,7 @@ import com.Teenkung.devDamageHandler.Indicator.IndicatorLine;
 import com.Teenkung.devDamageHandler.Indicator.IndicatorSettings;
 import com.Teenkung.devDamageHandler.Util.Msg;
 import io.lumine.mythic.bukkit.MythicBukkit;
+import io.lumine.mythic.lib.UtilityMethods;
 import io.lumine.mythic.lib.api.event.IndicatorDisplayEvent;
 import io.lumine.mythic.lib.api.event.PlayerAttackEvent;
 import io.lumine.mythic.lib.damage.DamageMetadata;
@@ -48,6 +49,14 @@ public class DamageHandler implements Listener {
         this.plugin = plugin;
     }
 
+    // Fire damage causes (matching MythicLib's DamageReduction)
+    private static final Set<EntityDamageEvent.DamageCause> FIRE_DAMAGE_CAUSES = Set.of(
+        EntityDamageEvent.DamageCause.FIRE,
+        EntityDamageEvent.DamageCause.FIRE_TICK,
+        EntityDamageEvent.DamageCause.LAVA,
+        EntityDamageEvent.DamageCause.MELTING
+    );
+
     // Context for passing data from DevDamageMechanic (synchronous)
     public static final ThreadLocal<Map<Element, Double>> pendingElements = new ThreadLocal<>();
     public static final ThreadLocal<Set<DamageType>> pendingTypes = new ThreadLocal<>();
@@ -66,6 +75,44 @@ public class DamageHandler implements Listener {
         String number = plugin.getFontCodec().decodeNumbers(event.getMessage());
         if ("0".equals(number) || ".0".equals(number)) {
             event.setCancelled(true);
+        }
+    }
+
+    /* ======================================================================
+       ENVIRONMENTAL DAMAGE REDUCTIONS (fire, fall)
+       Replaces MythicLib's DamageReduction for cause-specific stats.
+       ====================================================================== */
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onEnvironmentalDamage(EntityDamageEvent event) {
+        // Skip combat events (handled by onDamageModify / onEntityDamage)
+        if (event instanceof EntityDamageByEntityEvent) return;
+        if (!(event.getEntity() instanceof Player player)) return;
+
+        MMOPlayerData data = MMOPlayerData.getOrNull(player);
+        if (data == null) return;
+
+        DamageConfig config = plugin.getDamageConfig();
+        double multiplier = 1.0;
+
+        // FIRE_DAMAGE_REDUCTION: applies to FIRE, FIRE_TICK, LAVA, MELTING
+        if (FIRE_DAMAGE_CAUSES.contains(event.getCause())) {
+            double fireReduction = data.getStatMap().getStat("FIRE_DAMAGE_REDUCTION");
+            if (fireReduction > 1e-6) {
+                multiplier *= config.calculatePercentDefenseMultiplier(fireReduction);
+            }
+        }
+
+        // FALL_DAMAGE_REDUCTION: applies to FALL
+        if (event.getCause() == EntityDamageEvent.DamageCause.FALL) {
+            double fallReduction = data.getStatMap().getStat("FALL_DAMAGE_REDUCTION");
+            if (fallReduction > 1e-6) {
+                multiplier *= config.calculatePercentDefenseMultiplier(fallReduction);
+            }
+        }
+
+        if (Math.abs(multiplier - 1.0) > 1e-6) {
+            event.setDamage(event.getDamage() * multiplier);
         }
     }
 
@@ -143,7 +190,7 @@ public class DamageHandler implements Listener {
             
             HitContext ctx = plugin.consumeHit(dmg);
             if (ctx != null) {
-                displayIndicatorsWrapper(target, attacker, dmg, ctx, null);
+                displayIndicatorsWrapper(target, attacker, dmg, ctx, null, event.getFinalDamage(), true);
             }
             
         } catch (Exception e) {
@@ -167,10 +214,13 @@ public class DamageHandler implements Listener {
         // 1. Determine Stat Provider
         StatProvider statProvider = createStatProvider(attacker);
 
-        // 2. Determine Debug Recipient
+        // 2. Determine Debug Context
         DebugContext debugCtx = resolveDebugContext(attacker, victim);
 
-        // 3. Modifiers (MythicMobs - on victim)
+        // 3. Create DebugReport if debug is enabled
+        DebugReport report = debugCtx.enabled ? new DebugReport() : null;
+
+        // 4. Modifiers (MythicMobs - on victim)
         Map<String, Double> victimMmMods = getMythicDamageModifiers(victim);
         Map<String, Double> attackerMmMods = getMythicDamageModifiers(attacker);
         
@@ -178,12 +228,38 @@ public class DamageHandler implements Listener {
         Map<Element, Double> elemRawOverride = pendingElements.get();
         Set<DamageType> typeOverride = pendingTypes.get();
 
-        // 4. Calculate Logic
+        // 5. Calculate Logic
         Set<DamageType> activeTypes = typeOverride != null ? typeOverride : dmg.collectTypes();
         if (activeTypes == null) activeTypes = new HashSet<>();
         
         // Elements - collect initial element data
         Map<Element, Double> elemRaw = collectElementDamage(dmg, elemRawOverride);
+
+        // Populate debug report context and raw damage
+        if (report != null) {
+            String attackerId = getTargetId(attacker);
+            String targetId = getTargetId(victim);
+            String attackerType = attacker instanceof Player ? "Player" : "Mob";
+            String targetType = victim instanceof Player ? "Player" : "Mob";
+            report.setContext(attackerId, targetId, attackerType, targetType);
+
+            // Capture raw packets BEFORE any modifications
+            List<DebugReport.PacketInfo> rawPkts = new ArrayList<>();
+            for (DamagePacket p : dmg.getPackets()) {
+                rawPkts.add(new DebugReport.PacketInfo(
+                    p.getFinalValue(),
+                    p.getTypes().toString(),
+                    p.getElement() != null ? p.getElement().getId() : "NONE"
+                ));
+            }
+            report.setRawDamage(originalDamage, rawPkts);
+
+            // Collect attacker stats
+            collectAttackerStatsForReport(attacker, elemRaw.keySet(), report);
+
+            // Store MM mods
+            report.setMythicMobsMods(attackerMmMods, victimMmMods);
+        }
 
         // Fire Pre-Process Event (allows modification before modifiers)
         DamagePreProcessEvent preProcessEvent = new DamagePreProcessEvent(
@@ -201,20 +277,46 @@ public class DamageHandler implements Listener {
             }
         }
 
+        // Apply victim player defense stats
+        boolean applyMobVsPlayerDefense = !isPlayerAttack && victim instanceof Player && !(attacker instanceof Player);
+        boolean applyPvpDefense = isPlayerAttack && victim instanceof Player;
+        if (applyMobVsPlayerDefense || applyPvpDefense) {
+            Player playerVictim = (Player) victim;
+            double defenseBaseDamage = dmg.getPackets().stream()
+                .mapToDouble(DamagePacket::getFinalValue)
+                .sum();
+            PlayerDefenseApplicator.applyDefense(
+                playerVictim,
+                dmg,
+                mobConfig,
+                defenseBaseDamage,
+                plugin.getDamageConfig(),
+                applyPvpDefense,
+                report
+            );
+        }
+
         DamageModifierApplicator applicator = new DamageModifierApplicator(
             statProvider, 
-            debugCtx.recipient,
             dmg,
             victimMmMods, 
-            debugCtx.enabled
+            report
         );
         
         // Apply type and stat modifiers
         Map<DamageType, Double> typeMultipliers = applicator.applyTypeModifiers();
         applyStatMultipliers(dmg, applicator.getStatMultipliers(activeTypes));
 
-        // Merge player victim's element defense stats into modifiers
-        mergePlayerElementDefense(victim, elemRaw, victimMmMods, debugCtx);
+        // Apply context-based offensive bonuses (PVP/PVE_DAMAGE, UNDEAD_DAMAGE)
+        // These were previously handled by MythicLib's LegacyAttackEffects (now unregistered)
+        if (isPlayerAttack) {
+            applyContextBonuses(dmg, statProvider, victim, report);
+        }
+
+        // Merge player victim's element defense stats into modifiers (player attack flow).
+        if (!applyMobVsPlayerDefense) {
+            mergePlayerElementDefense(victim, elemRaw, victimMmMods, report);
+        }
 
         // Track if attack originally had elemental damage BEFORE modifiers
         boolean originallyHadElements = !elemRaw.isEmpty();
@@ -225,7 +327,7 @@ public class DamageHandler implements Listener {
 
         // Fire immunity event if there are immune elements
         if (!elementResult.immuneElements().isEmpty()) {
-            final Map<Element, Double> elemRawForLambda = elemRaw; // Capture current state for lambda
+            final Map<Element, Double> elemRawForLambda = elemRaw;
             double blockedDamage = elementResult.immuneElements().stream()
                 .mapToDouble(el -> elemRawForLambda.getOrDefault(el, 0.0))
                 .sum();
@@ -241,6 +343,11 @@ public class DamageHandler implements Listener {
         // Non-Elemental / Carrier packet handling
         NonElementalContext nonElemCtx = processNonElementalDamage(dmg, elemRaw, originallyHadElements, originalElementalTotal);
 
+        // Carrier bonus transfer
+        if (report != null && nonElemCtx.carrierBonusTransferred > 0) {
+            report.setCarrierTransfer(nonElemCtx.carrierBonusTransferred);
+        }
+
         // Crits - Unified handling for Weapon, Skill, and Elemental crits
         DamageModifierApplicator.CritResult crits = applicator.calculateCrits(elemRaw, nonElemCtx.damage, activeTypes);
 
@@ -254,7 +361,7 @@ public class DamageHandler implements Listener {
         double nonElemMul = applicator.applyNoneElementModifier(nonElemCtx.damage, activeTypes);
 
         // Apply pending LibReforge modifiers
-        double nonElemDamage = applyPendingModifiers(dmg, nonElemCtx.damage, debugCtx);
+        double nonElemDamage = applyPendingModifiers(dmg, nonElemCtx.damage, report);
 
         // Apply non-elemental crit multiplier
         applyNonElementalCrit(dmg, crits);
@@ -271,9 +378,22 @@ public class DamageHandler implements Listener {
         // Fire DamageCalculated API Events
         fireDamageCalculatedEvent(attacker, victim, dmg, ctx, elemRaw, elementResult, crits, victimMmMods, isPlayerAttack);
 
-        // Debug output
-        printDebugOutput(debugCtx, isPlayerAttack, mobConfig, attacker, victim, dmg,
-                        elemRaw, attackerMmMods, victimMmMods, targetId);
+        // Render debug report
+        if (report != null) {
+            // Capture final packets
+            List<DebugReport.PacketInfo> finalPkts = new ArrayList<>();
+            double finalTotal = 0;
+            for (DamagePacket p : dmg.getPackets()) {
+                finalPkts.add(new DebugReport.PacketInfo(
+                    p.getFinalValue(),
+                    p.getTypes().toString(),
+                    p.getElement() != null ? p.getElement().getId() : "NONE"
+                ));
+                finalTotal += p.getFinalValue();
+            }
+            report.setFinalDamage(finalTotal, finalPkts);
+            report.render(debugCtx.recipient);
+        }
     }
 
     /**
@@ -362,6 +482,47 @@ public class DamageHandler implements Listener {
 
     private record DebugContext(boolean enabled, org.bukkit.command.CommandSender recipient) {}
 
+    /**
+     * Collect relevant attacker stats for the debug report.
+     */
+    private void collectAttackerStatsForReport(LivingEntity attacker, Set<Element> elements, DebugReport report) {
+        if (!(attacker instanceof Player p)) return;
+        MMOPlayerData data = MMOPlayerData.get(p.getUniqueId());
+        if (data == null) return;
+
+        double critChance = data.getStatMap().getStat("CRITICAL_STRIKE_CHANCE");
+        double critPower = data.getStatMap().getStat("CRITICAL_STRIKE_POWER");
+        if (critChance > 0 || critPower > 0) {
+            report.addAttackerStat("Weapon Crit", DamageDebug.fmt(critChance) + "% chance, " + DamageDebug.fmt(critPower) + "% power");
+        }
+
+        double skillCritChance = data.getStatMap().getStat("SKILL_CRITICAL_STRIKE_CHANCE");
+        double skillCritPower = data.getStatMap().getStat("SKILL_CRITICAL_STRIKE_POWER");
+        if (skillCritChance > 0 || skillCritPower > 0) {
+            report.addAttackerStat("Skill Crit", DamageDebug.fmt(skillCritChance) + "% chance, " + DamageDebug.fmt(skillCritPower) + "% power");
+        }
+
+        double elemCritChance = data.getStatMap().getStat("ELEMENTAL_CRITICAL_STRIKE_CHANCE");
+        double elemCritPower = data.getStatMap().getStat("ELEMENTAL_CRITICAL_STRIKE_POWER");
+        if (elemCritChance > 0 || elemCritPower > 0) {
+            report.addAttackerStat("Elem Crit", DamageDebug.fmt(elemCritChance) + "% chance, " + DamageDebug.fmt(elemCritPower) + "% power");
+        }
+
+        for (Element el : elements) {
+            String elId = el.getId().toUpperCase();
+            double elemDmg = data.getStatMap().getStat(elId + "_DAMAGE");
+            double elemPct = data.getStatMap().getStat(elId + "_DAMAGE_PERCENT");
+            double addElem = data.getStatMap().getStat("ADDITIONAL_ELEMENTAL_DAMAGE");
+            StringBuilder val = new StringBuilder();
+            if (elemDmg > 0) val.append(DamageDebug.fmt(elemDmg)).append(" base ");
+            if (elemPct > 0) val.append("+").append(DamageDebug.fmt(elemPct)).append("% ");
+            if (addElem > 0) val.append("+").append(DamageDebug.fmt(addElem)).append("% ALL");
+            if (!val.isEmpty()) {
+                report.addAttackerStat(elId + " Elem", val.toString().trim());
+            }
+        }
+    }
+
     private DebugContext resolveDebugContext(LivingEntity attacker, LivingEntity victim) {
         if (debugOverride.get() != null) {
             return new DebugContext(true, debugOverride.get());
@@ -392,6 +553,37 @@ public class DamageHandler implements Listener {
         }
     }
 
+    /**
+     * Apply context-based offensive bonuses that MythicLib's LegacyAttackEffects used to handle.
+     * These are global additive modifiers (apply to all damage packets):
+     * - PVP_DAMAGE or PVE_DAMAGE depending on whether victim is a player
+     * - UNDEAD_DAMAGE if victim is an undead entity
+     */
+    private void applyContextBonuses(DamageMetadata dmg, StatProvider statProvider,
+                                     LivingEntity victim, DebugReport report) {
+        // PVP_DAMAGE or PVE_DAMAGE
+        boolean isPvp = victim instanceof Player;
+        String contextStat = isPvp ? "PVP_DAMAGE" : "PVE_DAMAGE";
+        double contextValue = statProvider.apply(contextStat);
+        if (contextValue > 1e-6) {
+            dmg.additiveModifier(contextValue / 100.0);
+            if (report != null) {
+                report.addStatBonus(contextStat, contextValue);
+            }
+        }
+
+        // UNDEAD_DAMAGE
+        if (UtilityMethods.isUndead(victim)) {
+            double undeadValue = statProvider.apply("UNDEAD_DAMAGE");
+            if (undeadValue > 1e-6) {
+                dmg.additiveModifier(undeadValue / 100.0);
+                if (report != null) {
+                    report.addStatBonus("UNDEAD_DAMAGE", undeadValue);
+                }
+            }
+        }
+    }
+
     private Map<Element, Double> collectElementDamage(DamageMetadata dmg, Map<Element, Double> override) {
         Map<Element, Double> elemRaw = new LinkedHashMap<>();
         if (override != null) {
@@ -408,7 +600,7 @@ public class DamageHandler implements Listener {
     }
 
     private void mergePlayerElementDefense(LivingEntity victim, Map<Element, Double> elemRaw,
-                                           Map<String, Double> victimMmMods, DebugContext debugCtx) {
+                                           Map<String, Double> victimMmMods, DebugReport report) {
         if (!(victim instanceof Player playerVictim) || elemRaw.isEmpty()) return;
 
         Map<String, Double> playerElemDefense = getPlayerElementDefense(playerVictim, elemRaw);
@@ -418,15 +610,12 @@ public class DamageHandler implements Listener {
             victimMmMods.putIfAbsent(e.getKey(), e.getValue());
         }
 
-        if (debugCtx.enabled) {
+        if (report != null) {
             for (Map.Entry<String, Double> e : playerElemDefense.entrySet()) {
                 String elName = e.getKey().replace("ELEMENT_", "");
                 double mul = e.getValue();
                 double reductionPct = (1.0 - mul) * 100;
-                String color = mul < 1.0 ? "<green>" : "<red>";
-                Msg.send(debugCtx.recipient,
-                    "<gray>Player " + elName + " defense:</gray> " + color + "-" + DamageDebug.fmt(reductionPct) + "%"
-                    + (mul < 1.0 ? "</green>" : "</red>") + " <gray>(x" + DamageDebug.fmt(mul) + ")</gray>");
+                report.addPlayerElementDefense(elName, reductionPct, mul);
             }
         }
     }
@@ -442,7 +631,7 @@ public class DamageHandler implements Listener {
         return elemRaw;
     }
 
-    private record NonElementalContext(double damage, boolean hasElementalDamage) {}
+    private record NonElementalContext(double damage, boolean hasElementalDamage, double carrierBonusTransferred) {}
 
     private NonElementalContext processNonElementalDamage(DamageMetadata dmg, Map<Element, Double> elemRaw,
                                                           boolean originallyHadElements, double originalElementalTotal) {
@@ -452,9 +641,55 @@ public class DamageHandler implements Listener {
         
         boolean hasElementalDamage = originallyHadElements && originalElementalTotal > 0;
         double nonElemDamage = hasElementalDamage ? 0 : Math.max(0, nonElemRaw);
-        
-        // Zero out carrier packets when weapon has elemental damage
-        if (hasElementalDamage) {
+        double carrierBonusTransferred = 0;
+
+        // Config options for carrier handling
+        boolean shouldIgnoreCarrier = plugin.getDamageConfig().isIgnoreCarrierOnElemental();
+        boolean shouldTransfer = plugin.getDamageConfig().isTransferCarrierToElemental();
+
+        // When weapon has elemental damage and we should ignore carrier
+        if (hasElementalDamage && shouldIgnoreCarrier) {
+            // Transfer carrier packet damage to elemental packets if enabled
+            // This preserves enchantment bonuses (Sharpness, Smite, etc.) that are in the carrier
+            if (nonElemRaw > 0 && shouldTransfer) {
+                carrierBonusTransferred = nonElemRaw;
+
+                // Calculate total elemental damage for proportional distribution
+                double totalElemDmg = elemRaw.values().stream().mapToDouble(Double::doubleValue).sum();
+
+                if (totalElemDmg > 0) {
+                    // Pre-calculate bonus per element (to avoid issues with multiple packets per element)
+                    Map<Element, Double> bonusPerElement = new HashMap<>();
+                    for (Map.Entry<Element, Double> entry : elemRaw.entrySet()) {
+                        Element elem = entry.getKey();
+                        double elemDmg = entry.getValue();
+                        double proportion = elemDmg / totalElemDmg;
+                        double bonusForThisElement = carrierBonusTransferred * proportion;
+                        bonusPerElement.put(elem, bonusForThisElement);
+                    }
+
+                    // Track which elements we've already applied bonus to (for multiple packets per element)
+                    Set<Element> appliedElements = new HashSet<>();
+
+                    // Apply bonus to packets - only once per element
+                    for (DamagePacket packet : dmg.getPackets()) {
+                        Element elem = packet.getElement();
+                        if (elem != null && bonusPerElement.containsKey(elem) && !appliedElements.contains(elem)) {
+                            double bonusForThisElement = bonusPerElement.get(elem);
+                            if (bonusForThisElement > 0) {
+                                // Direct flat addition to packet value
+                                packet.setValue(packet.getValue() + bonusForThisElement);
+                                // Update elemRaw to reflect the bonus
+                                elemRaw.put(elem, elemRaw.get(elem) + bonusForThisElement);
+                                // Mark as applied
+                                appliedElements.add(elem);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Zero out carrier packets (whether or not we transferred)
             for (DamagePacket packet : dmg.getPackets()) {
                 if (packet.getElement() == null && packet.getFinalValue() > 0) {
                     for (DamageType type : packet.getTypes()) {
@@ -464,7 +699,7 @@ public class DamageHandler implements Listener {
             }
         }
         
-        return new NonElementalContext(nonElemDamage, hasElementalDamage);
+        return new NonElementalContext(nonElemDamage, hasElementalDamage, carrierBonusTransferred);
     }
 
     private void applyElementalCrits(DamageMetadata dmg, DamageModifierApplicator.CritResult crits,
@@ -475,13 +710,13 @@ public class DamageHandler implements Listener {
         });
     }
 
-    private double applyPendingModifiers(DamageMetadata dmg, double nonElemDamage, DebugContext debugCtx) {
-        nonElemDamage = applyPendingFlatDamage(dmg, nonElemDamage, debugCtx);
-        applyPendingMultiplier(dmg, debugCtx);
+    private double applyPendingModifiers(DamageMetadata dmg, double nonElemDamage, DebugReport report) {
+        nonElemDamage = applyPendingFlatDamage(dmg, nonElemDamage, report);
+        applyPendingMultiplier(dmg, report);
         return nonElemDamage;
     }
 
-    private double applyPendingFlatDamage(DamageMetadata dmg, double nonElemDamage, DebugContext debugCtx) {
+    private double applyPendingFlatDamage(DamageMetadata dmg, double nonElemDamage, DebugReport report) {
         Double pendingFlat = pendingFlatDamage.get();
         if (pendingFlat == null || Math.abs(pendingFlat) <= 1e-6) {
             return nonElemDamage;
@@ -502,14 +737,14 @@ public class DamageHandler implements Listener {
             dmg.getPackets().get(0).setValue(dmg.getPackets().get(0).getValue() + pendingFlat);
         }
 
-        if (debugCtx.enabled) {
-            Msg.send(debugCtx.recipient, "<gray>LibReforge Flat Damage:</gray> <white>+" + DamageDebug.fmt(pendingFlat) + "</white>");
+        if (report != null) {
+            report.addPendingModifier("LibReforge Flat Damage", "+" + DamageDebug.fmt(pendingFlat));
         }
 
         return nonElemDamage;
     }
 
-    private void applyPendingMultiplier(DamageMetadata dmg, DebugContext debugCtx) {
+    private void applyPendingMultiplier(DamageMetadata dmg, DebugReport report) {
         Double pendingMul = pendingMultiplier.get();
         if (pendingMul == null || Math.abs(pendingMul - 1.0) <= 1e-6) {
             return;
@@ -518,7 +753,6 @@ public class DamageHandler implements Listener {
         pendingMultiplier.remove();
 
         if (Math.abs(pendingMul) < 1e-6) {
-            // Zero multiplier
             for (DamagePacket packet : dmg.getPackets()) {
                 packet.setValue(0);
             }
@@ -528,8 +762,8 @@ public class DamageHandler implements Listener {
             }
         }
 
-        if (debugCtx.enabled) {
-            Msg.send(debugCtx.recipient, "<gray>LibReforge Multiplier:</gray> <aqua>x" + DamageDebug.fmt(pendingMul) + "</aqua>");
+        if (report != null) {
+            report.addPendingModifier("LibReforge Multiplier", "×" + DamageDebug.fmt(pendingMul));
         }
     }
 
@@ -576,21 +810,8 @@ public class DamageHandler implements Listener {
         );
     }
 
-    private void printDebugOutput(DebugContext debugCtx, boolean isPlayerAttack, MobElementConfig mobConfig,
-                                  LivingEntity attacker, LivingEntity victim, DamageMetadata dmg,
-                                  Map<Element, Double> elemRaw, Map<String, Double> attackerMmMods,
-                                  Map<String, Double> victimMmMods, String targetId) {
-        if (!debugCtx.enabled) return;
-
-        if (!isPlayerAttack && mobConfig != null && victim instanceof Player) {
-            DamageDebug.printMobAttackDebug(debugCtx.recipient, attacker, victim, mobConfig, dmg, attackerMmMods, victimMmMods);
-        } else {
-            DamageDebug.printDebugHeader(debugCtx.recipient, victim, dmg, elemRaw, victimMmMods, targetId);
-            DamageDebug.printDebugFooter(debugCtx.recipient, dmg);
-        }
-
-        DamageDebug.printRelevantStats(debugCtx.recipient, attacker, victim, elemRaw.keySet());
-    }
+    // Debug output is now handled by DebugReport.render() at the end of processDamage.
+    // The old printDebugOutput method is no longer needed.
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamageShow(PlayerAttackEvent event) {
@@ -599,7 +820,7 @@ public class DamageHandler implements Listener {
         if (ctx == null) return;
 
         // Display
-        displayIndicatorsWrapper(event.getEntity(), event.getAttacker().getEntity(), dmg, ctx, null);
+        displayIndicatorsWrapper(event.getEntity(), event.getAttacker().getEntity(), dmg, ctx, null, null, false);
     }
     
     /* ======================================================================
@@ -646,10 +867,11 @@ public class DamageHandler implements Listener {
         DamageMetadata dummyMeta = new DamageMetadata(finalDamage, DamageType.PHYSICAL);
         
         // Display
-        displayIndicatorsWrapper(target, null, dummyMeta, vanillaCtx, Collections.emptySet());
+        displayIndicatorsWrapper(target, null, dummyMeta, vanillaCtx, Collections.emptySet(), finalDamage, true);
     }
 
-    private void displayIndicatorsWrapper(LivingEntity target, LivingEntity attacker, DamageMetadata dmg, HitContext ctx, Set<DamageType> typeOverride) {
+    private void displayIndicatorsWrapper(LivingEntity target, LivingEntity attacker, DamageMetadata dmg, HitContext ctx,
+                                          Set<DamageType> typeOverride, Double bukkitFinalDamage, boolean forceBukkitScaling) {
         // Mark that we handled this entity this tick
         lastIndicatorTick.put(target, target.getWorld().getFullTime());
 
@@ -671,19 +893,22 @@ public class DamageHandler implements Listener {
         List<IndicatorLine> lines = IndicatorBuilder.buildLines(ctx, statProvider, baseTypes, settings);
         
         // Scale
-        double finalDamage = dmg.getPackets().stream().mapToDouble(DamagePacket::getFinalValue).sum();
+        double packetDamage = dmg.getPackets().stream().mapToDouble(DamagePacket::getFinalValue).sum();
         
         // Safety fallback for vanilla contexts or empty packets
         if (dmg.getPackets().isEmpty()) {
-            finalDamage = ctx.nonElemDamage();
+            packetDamage = ctx.nonElemDamage();
         }
-        
-        double scaleTarget = IndicatorBuilder.getScalingTarget(settings, dmg, lines, finalDamage);
+
+        double effectiveBukkitDamage = (bukkitFinalDamage != null) ? bukkitFinalDamage : packetDamage;
+        double scaleTarget = forceBukkitScaling
+            ? effectiveBukkitDamage
+            : IndicatorBuilder.getScalingTarget(settings, dmg, lines, effectiveBukkitDamage);
         lines = IndicatorBuilder.scaleLines(lines, scaleTarget);
 
         // Fire indicator display event
         DamageIndicatorDisplayEvent indicatorEvent = new DamageIndicatorDisplayEvent(
-            target, attacker, lines, finalDamage
+            target, attacker, lines, effectiveBukkitDamage
         );
         Bukkit.getPluginManager().callEvent(indicatorEvent);
 
@@ -694,7 +919,8 @@ public class DamageHandler implements Listener {
         // Use potentially modified lines from the event
         lines = indicatorEvent.getIndicatorLines();
 
-        // Debug (only if player attacker for now? or check debug recipient?)
+        // Indicator debug lines are now part of the DebugReport, printed in §7.
+        // We keep IndicatorBuilder.printDebugLines for standalone indicator debugging.
         if (attacker instanceof Player p && plugin.isDebugging(p)) {
             IndicatorBuilder.printDebugLines(p, lines);
         }

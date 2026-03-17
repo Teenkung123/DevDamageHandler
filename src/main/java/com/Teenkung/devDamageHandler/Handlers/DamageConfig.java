@@ -33,12 +33,15 @@ public class DamageConfig {
     
     // Damage settings
     private final boolean ignoreCarrierOnElemental;
-    
+    private final boolean transferCarrierToElemental;
+
     // Flat defense formula settings
     private final FormulaType flatDefenseType;
     private final double flatDefenseBase;
     
-    // Percent defense settings
+    // Percent defense formula settings
+    private final FormulaType percentDefenseType;
+    private final double percentDefenseBase;
     private final double percentDefenseCap;
     
     // Weakness settings
@@ -52,7 +55,8 @@ public class DamageConfig {
         // Damage section
         ConfigurationSection damageSec = root != null ? root.getConfigurationSection("damage") : null;
         this.ignoreCarrierOnElemental = damageSec != null && damageSec.getBoolean("ignore-carrier-on-elemental", true);
-        
+        this.transferCarrierToElemental = damageSec == null || damageSec.getBoolean("transfer-carrier-to-elemental", true);
+
         // Formulas section
         ConfigurationSection formulaSec = root != null ? root.getConfigurationSection("formulas") : null;
         
@@ -61,8 +65,10 @@ public class DamageConfig {
         this.flatDefenseType = parseFormulaType(flatDefSec != null ? flatDefSec.getString("type", "DIMINISHING") : "DIMINISHING");
         this.flatDefenseBase = flatDefSec != null ? flatDefSec.getDouble("base", 100) : 100;
         
-        // Percent defense
+        // Percent defense formula
         ConfigurationSection pctDefSec = formulaSec != null ? formulaSec.getConfigurationSection("percent-defense") : null;
+        this.percentDefenseType = parseFormulaType(pctDefSec != null ? pctDefSec.getString("type", "LINEAR") : "LINEAR");
+        this.percentDefenseBase = pctDefSec != null ? pctDefSec.getDouble("base", 100) : 100;
         this.percentDefenseCap = pctDefSec != null ? pctDefSec.getDouble("cap", 90) : 90;
         
         // Weakness
@@ -86,8 +92,11 @@ public class DamageConfig {
     // Default constructor with sane defaults
     public DamageConfig() {
         this.ignoreCarrierOnElemental = true;
+        this.transferCarrierToElemental = true;
         this.flatDefenseType = FormulaType.DIMINISHING;
         this.flatDefenseBase = 100;
+        this.percentDefenseType = FormulaType.LINEAR;
+        this.percentDefenseBase = 100;
         this.percentDefenseCap = 90;
         this.weaknessCap = 200;
         this.showImmuneIndicator = true;
@@ -99,6 +108,10 @@ public class DamageConfig {
         return ignoreCarrierOnElemental;
     }
     
+    public boolean isTransferCarrierToElemental() {
+        return transferCarrierToElemental;
+    }
+
     public FormulaType getFlatDefenseType() {
         return flatDefenseType;
     }
@@ -109,6 +122,14 @@ public class DamageConfig {
     
     public double getPercentDefenseCap() {
         return percentDefenseCap;
+    }
+
+    public FormulaType getPercentDefenseType() {
+        return percentDefenseType;
+    }
+
+    public double getPercentDefenseBase() {
+        return percentDefenseBase;
     }
     
     public double getWeaknessCap() {
@@ -177,15 +198,25 @@ public class DamageConfig {
     }
     
     /**
-     * Calculate percent defense multiplier.
-     * 
+     * Calculate percent defense multiplier using the configured formula.
+     *
      * @param percentReduction The reduction percentage (0-100+)
      * @return The damage multiplier (0 to 1)
      */
     public double calculatePercentDefenseMultiplier(double percentReduction) {
         if (percentReduction <= 0) return 1.0;
-        double capped = Math.min(percentReduction, percentDefenseCap);
-        return 1.0 - (capped / 100.0);
+
+        switch (percentDefenseType) {
+            case DIMINISHING:
+                // reduction / (reduction + base) → never reaches 1.0
+                // With base=100: 50 → 33%, 100 → 50%, 200 → 67%
+                return 1.0 - (percentReduction / (percentReduction + percentDefenseBase));
+            case LINEAR:
+            default:
+                // Direct percentage, capped to prevent immunity
+                double capped = Math.min(percentReduction, percentDefenseCap);
+                return 1.0 - (capped / 100.0);
+        }
     }
     
     /**

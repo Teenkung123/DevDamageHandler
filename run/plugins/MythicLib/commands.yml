@@ -1,6 +1,0 @@
-mythiclib:
-  main: mythiclib
-  permission: mythiclib.admin
-  aliases:
-  - ml
-  description: Main admin command

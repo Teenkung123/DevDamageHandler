@@ -1,6 +1,5 @@
 package com.Teenkung.devDamageHandler;
 
-import com.Teenkung.devDamageHandler.API.DevDamageAPI;
 import com.Teenkung.devDamageHandler.Commands.DevDHCommandExecutor;
 import com.Teenkung.devDamageHandler.Commands.DevDHCommandTabCompleter;
 import com.Teenkung.devDamageHandler.Handlers.DamageConfig;
@@ -11,13 +10,18 @@ import com.Teenkung.devDamageHandler.Indicator.HologramLibIndicators;
 import com.Teenkung.devDamageHandler.Indicator.IndicatorSettings;
 import com.Teenkung.devDamageHandler.Integration.LibReforge.LibreForgeHook;
 import com.Teenkung.devDamageHandler.Integration.LibReforge.StatTracking;
+import com.Teenkung.devDamageHandler.Integration.PlaceholderAPI.DDHPlaceholders;
 import com.Teenkung.devDamageHandler.Util.FontCodec;
 import com.maximde.hologramlib.HologramLib;
 import com.maximde.hologramlib.hologram.HologramManager;
 import io.lumine.mythic.lib.damage.DamageMetadata;
+import me.clip.placeholderapi.PlaceholderAPIPlugin;
+import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
+import org.bukkit.event.HandlerList;
+import org.bukkit.plugin.RegisteredListener;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.*;
@@ -47,6 +51,9 @@ public final class DevDamageHandler extends JavaPlugin {
     
     // Damage configuration
     private DamageConfig damageConfig;
+
+    // PlaceholderAPI expansion
+    private DDHPlaceholders papiExpansion;
 
     // Hit context cache (for passing data between damage phases)
     private final Map<DamageMetadata, DamageHandler.HitContext> hitCache =
@@ -89,7 +96,7 @@ public final class DevDamageHandler extends JavaPlugin {
 
         // Try to get HologramLib manager
         try {
-            // Fix for HologramLib hotloading (it might hold stale plugin reference from previous load)
+            // Fix for HologramLib hot loading (it might hold stale plugin reference from previous load)
             // We use reflection to force update the 'plugin' field in HologramLib class if it exists
             try {
                 Class<?> clazz = Class.forName("com.maximde.hologramlib.HologramLib");
@@ -134,6 +141,9 @@ public final class DevDamageHandler extends JavaPlugin {
         // Register damage handler
         Bukkit.getPluginManager().registerEvents(new DamageHandler(this), this);
 
+        // Unregister MythicLib listeners that conflict with DevDamageHandler's pipeline
+        unregisterMythicLibConflicts();
+
         // Register custom mechanics
         Bukkit.getPluginManager().registerEvents(new com.Teenkung.devDamageHandler.Mechanics.MechanicRegistry(), this);
 
@@ -145,6 +155,19 @@ public final class DevDamageHandler extends JavaPlugin {
             getCommand("ddh").setExecutor(cmd);
             //noinspection DataFlowIssue
             getCommand("ddh").setTabCompleter(tab);
+        }
+
+        // Register PlaceholderAPI expansion
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            // Unregister any stale "ddh" expansion left by a previous load (PlugMan hot-reload safety)
+            PlaceholderAPIPlugin.getInstance()
+                    .getLocalExpansionManager()
+                    .findExpansionByIdentifier("ddh")
+                    .ifPresent(PlaceholderExpansion::unregister);
+
+            papiExpansion = new DDHPlaceholders(this);
+            papiExpansion.register();
+            getLogger().info("PlaceholderAPI expansion registered (prefix: ddh_)");
         }
 
         getLogger().info("DevDamageHandler enabled - Elements, Types, Crits, and Custom Stats");
@@ -167,8 +190,14 @@ public final class DevDamageHandler extends JavaPlugin {
 
         StatTracking.removeAllPlayers();
 
+        // Unregister PlaceholderAPI expansion
+        if (papiExpansion != null && papiExpansion.isRegistered()) {
+            papiExpansion.unregister();
+            papiExpansion = null;
+        }
+
         // Cleanup API instance
-        DevDamageAPI.cleanup();
+        com.Teenkung.devDamageHandler.API.DevDamageAPI.cleanup();
 
         getLogger().info("DevDamageHandler disabled");
     }
@@ -198,6 +227,50 @@ public final class DevDamageHandler extends JavaPlugin {
         } else {
             indicators = new CustomIndicators(dmgSec, fontCodec);
             hologramLibIndicators = null;
+        }
+    }
+
+    /* =======================
+       MythicLib Conflict Resolution
+       ======================= */
+
+    /**
+     * Unregisters MythicLib listeners whose functionality is fully replaced by DevDamageHandler.
+     *
+     * DamageReduction (HIGHEST on AttackEvent):
+     *   Applies DAMAGE_REDUCTION, DEFENSE, PVP/PVE_DAMAGE_REDUCTION, {TYPE}_DAMAGE_REDUCTION.
+     *   Replaced by: PlayerDefenseApplicator (with configurable LINEAR/DIMINISHING formulas).
+     *
+     * LegacyAttackEffects (HIGH on PlayerAttackEvent):
+     *   Applies {TYPE}_DAMAGE offensive bonuses, PVP_DAMAGE, PVE_DAMAGE, UNDEAD_DAMAGE.
+     *   Replaced by: DamageModifierApplicator.getStatMultipliers() for type bonuses,
+     *   and DamageHandler.applyContextBonuses() for PVP/PVE/UNDEAD.
+     */
+    private void unregisterMythicLibConflicts() {
+        unregisterListener(
+            io.lumine.mythic.lib.api.event.AttackEvent.getHandlerList(),
+            "io.lumine.mythic.lib.listener.DamageReduction",
+            "DamageReduction"
+        );
+        unregisterListener(
+            io.lumine.mythic.lib.api.event.PlayerAttackEvent.getHandlerList(),
+            "io.lumine.mythic.lib.listener.LegacyAttackEffects",
+            "LegacyAttackEffects"
+        );
+    }
+
+    private void unregisterListener(HandlerList handlerList, String className, String displayName) {
+        try {
+            for (RegisteredListener rl : handlerList.getRegisteredListeners()) {
+                if (rl.getListener().getClass().getName().equals(className)) {
+                    handlerList.unregister(rl.getListener());
+                    getLogger().info("Unregistered MythicLib " + displayName + " (DevDamageHandler handles this)");
+                    return;
+                }
+            }
+            getLogger().warning("Could not find MythicLib " + displayName + " listener to unregister");
+        } catch (Exception e) {
+            getLogger().warning("Failed to unregister MythicLib " + displayName + ": " + e.getMessage());
         }
     }
 
