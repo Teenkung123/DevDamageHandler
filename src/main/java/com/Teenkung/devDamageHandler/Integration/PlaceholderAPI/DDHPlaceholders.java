@@ -2,6 +2,7 @@ package com.Teenkung.devDamageHandler.Integration.PlaceholderAPI;
 
 import com.Teenkung.devDamageHandler.DevDamageHandler;
 import com.Teenkung.devDamageHandler.Handlers.DamageConfig;
+import com.Teenkung.devDamageHandler.Handlers.PlayerDefenseApplicator;
 import io.lumine.mythic.lib.api.player.MMOPlayerData;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
@@ -49,6 +50,12 @@ import org.jetbrains.annotations.Nullable;
  *   ddh_magic_damage_reduction_calc_<n>    damage after MAGIC_DAMAGE_REDUCTION only
  *   ddh_projectile_damage_reduction_calc_<n> damage after PROJECTILE_DAMAGE_REDUCTION only
  *   ddh_total_calc_<n>                     damage after DEFENSE then DAMAGE_REDUCTION stacked
+ *
+ * ── Armor enchantment protection (vanilla-integration.armor-enchantments) ─
+ *   ddh_armor_prot                  raw EPF% from Protection enchantments (capped at 80)
+ *   ddh_armor_prot_pct              effective % damage reduced after DDH formula
+ *   ddh_armor_prot_projectile       raw EPF% including Projectile Protection
+ *   ddh_armor_prot_projectile_pct   effective % for projectile damage after DDH formula
  *
  * ── Element-specific placeholders (replace <ELEMENT> with element name) ─
  *   ddh_element_<ELEMENT>_defense                flat elemental defense stat
@@ -153,7 +160,12 @@ public class DDHPlaceholders extends PlaceholderExpansion {
 
         // ── Damage simulation: ddh_<stat>_calc_<number> ───────────────────
         if (params.contains("_calc_")) {
-            return resolveCalcParam(params, data, cfg);
+            return resolveCalcParam(params, player, data, cfg);
+        }
+
+        // ── Armor enchantment protection ─────────────────────────────────
+        if (params.startsWith("armor_prot")) {
+            return resolveArmorProtParam(params, player, cfg);
         }
 
         // ── Element-specific ──────────────────────────────────────────────
@@ -175,7 +187,7 @@ public class DDHPlaceholders extends PlaceholderExpansion {
      *   physical_damage_reduction, magic_damage_reduction, projectile_damage_reduction,
      *   total  (DEFENSE flat first, then DAMAGE_REDUCTION percent)
      */
-    private @Nullable String resolveCalcParam(String params, MMOPlayerData data, DamageConfig cfg) {
+    private @Nullable String resolveCalcParam(String params, Player player, MMOPlayerData data, DamageConfig cfg) {
         int idx = params.lastIndexOf("_calc_");
         String prefix    = params.substring(0, idx);
         String numberStr = params.substring(idx + "_calc_".length());
@@ -211,15 +223,37 @@ public class DDHPlaceholders extends PlaceholderExpansion {
                 return fmt2(damage * cfg.calculatePercentDefenseMultiplier(
                         data.getStatMap().getStat("PROJECTILE_DAMAGE_REDUCTION")));
             case "total": {
-                // Apply flat DEFENSE first, then DAMAGE_REDUCTION percent
+                // 1. Flat DEFENSE, 2. DAMAGE_REDUCTION percent, 3. armor enchant protection
                 double afterFlat = cfg.applyFlatDefense(damage,
                         data.getStatMap().getStat("DEFENSE"));
                 double afterPct  = afterFlat * cfg.calculatePercentDefenseMultiplier(
                         data.getStatMap().getStat("DAMAGE_REDUCTION"));
-                return fmt2(afterPct);
+                double armorProt = PlayerDefenseApplicator.calculateArmorEnchantProtection(player, false);
+                double afterArmor = afterPct * cfg.calculatePercentDefenseMultiplier(armorProt);
+                return fmt2(afterArmor);
             }
             default:
                 return null;
+        }
+    }
+
+    /**
+     * Handles ddh_armor_prot[_projectile][_pct]:
+     *   armor_prot                 raw EPF% from Protection only (e.g. 64.00)
+     *   armor_prot_pct             actual % reduced after DDH formula
+     *   armor_prot_projectile      raw EPF% including Projectile Protection
+     *   armor_prot_projectile_pct  actual % reduced for projectile after DDH formula
+     */
+    private @Nullable String resolveArmorProtParam(String params, Player player, DamageConfig cfg) {
+        boolean isProjectile = params.contains("projectile");
+        boolean isPct        = params.endsWith("_pct");
+
+        double rawPct = PlayerDefenseApplicator.calculateArmorEnchantProtection(player, isProjectile);
+
+        if (isPct) {
+            return fmt2((1.0 - cfg.calculatePercentDefenseMultiplier(rawPct)) * 100.0);
+        } else {
+            return fmt2(rawPct);
         }
     }
 

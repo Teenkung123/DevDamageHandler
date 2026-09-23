@@ -304,3 +304,33 @@ font-map:
 debug:
   # Players who have debug mode enabled by default on login
   default-enabled: []
+
+# ============================================================================
+# VANILLA INTEGRATION
+# ============================================================================
+# DDH can intercept vanilla mechanics and route them through its own formulas,
+# allowing diminishing returns, caps, and unified stats to apply everywhere.
+vanilla-integration:
+
+  # Route armor enchantment protection (Protection, Projectile Protection) through
+  # DDH's percent-defense formula instead of vanilla's flat reduction.
+  #
+  # When enabled:
+  #   - DDH reads EPF from armor and applies via percent-defense formula
+  #   - Vanilla DamageModifier.MAGIC (enchantment reduction) is zeroed for combat
+  #   - Stacks with other DAMAGE_REDUCTION stats using DDH's formula
+  #
+  # EPF → % formula: each level of Protection = 4%, max 80% (20 EPF)
+  #   Prot IV × 4 pieces = 64% fed into the configured percent-defense formula
+  armor-enchantments: true
+
+  # Route vanilla armor points through DDH's damage pipeline.
+  #
+  # When enabled:
+  #   - DDH zeroes DamageModifier.ARMOR so vanilla doesn't double-reduce
+  #   - DDH applies the vanilla armor formula as a multiplicative layer:
+  #       effective_armor = max(armor/5, armor - damage/(2 + toughness/4))
+  #       reduction = min(20, effective_armor) / 25   (max 80%)
+  #   - Armor toughness (diamond +2/piece, netherite +3/piece) is respected
+  #   - Stacks geometrically with DEFENSE, DAMAGE_REDUCTION, and enchantments
+  armor-points: true

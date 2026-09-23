@@ -5,6 +5,7 @@ import com.Teenkung.devDamageHandler.Handlers.DamageHandler;
 import com.Teenkung.devDamageHandler.Util.Msg;
 import com.willfp.eco.core.config.interfaces.Config;
 import com.willfp.libreforge.ConfigArguments;
+import com.willfp.libreforge.ConfigArgumentsKt;
 import com.willfp.libreforge.NoCompileData;
 import com.willfp.libreforge.effects.Effect;
 import com.willfp.libreforge.triggers.TriggerData;
@@ -26,7 +27,7 @@ public class DDHDamageMultiplier extends Effect<NoCompileData> {
     @NotNull
     @Override
     public ConfigArguments getArguments() {
-        return com.willfp.libreforge.ConfigArgumentsKt.arguments(builder -> {
+        return ConfigArgumentsKt.arguments(builder -> {
             builder.require("multiplier", "You must specify the multiplier amount!");
             return kotlin.Unit.INSTANCE;
         });
@@ -50,7 +51,8 @@ public class DDHDamageMultiplier extends Effect<NoCompileData> {
         DamageHandler.pendingMultiplier.set(multiplier);
 
         if (data.getPlayer() != null && plugin.getLibReforgeDebugMode(data.getPlayer())) {
-            Msg.send(data.getPlayer(), "Set Damage Multiplier: x" + multiplier);
+            String src = data.getHolder().getHolder().getId().toString();
+            Msg.send(data.getPlayer(), "<gray>[LR]</gray> <aqua>" + src + "</aqua> <gray>→ mult</gray> <white>×" + multiplier + "</white>");
         }
 
         return true;

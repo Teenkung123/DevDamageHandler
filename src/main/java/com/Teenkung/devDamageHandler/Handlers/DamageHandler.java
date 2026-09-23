@@ -57,6 +57,11 @@ public class DamageHandler implements Listener {
         EntityDamageEvent.DamageCause.MELTING
     );
 
+    // Guard against the same DamageMetadata being processed more than once
+    // (e.g. when a double-hit mechanic fires PlayerAttackEvent twice on the same DM object)
+    private final Set<DamageMetadata> processedMeta =
+        java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
+
     // Context for passing data from DevDamageMechanic (synchronous)
     public static final ThreadLocal<Map<Element, Double>> pendingElements = new ThreadLocal<>();
     public static final ThreadLocal<Set<DamageType>> pendingTypes = new ThreadLocal<>();
@@ -113,6 +118,29 @@ public class DamageHandler implements Listener {
 
         if (Math.abs(multiplier - 1.0) > 1e-6) {
             event.setDamage(event.getDamage() * multiplier);
+        }
+    }
+
+    /* ======================================================================
+       VANILLA ENCHANTMENT INTERCEPTION
+       When armor-enchantments integration is enabled, DDH has already applied
+       the equivalent protection % through its own formula. Zero the vanilla
+       DamageModifier.MAGIC (armor enchantment reduction) so it doesn't
+       double-reduce after DDH has processed.
+       ====================================================================== */
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void cancelVanillaArmorModifiers(EntityDamageByEntityEvent event) {
+        if (!(event.getEntity() instanceof Player)) return;
+        if (plugin.getDamageConfig().isVanillaArmorEnchantmentsEnabled()) {
+            if (event.isApplicable(EntityDamageEvent.DamageModifier.MAGIC)) {
+                event.setDamage(EntityDamageEvent.DamageModifier.MAGIC, 0);
+            }
+        }
+        if (plugin.getDamageConfig().isVanillaArmorPointsEnabled()) {
+            if (event.isApplicable(EntityDamageEvent.DamageModifier.ARMOR)) {
+                event.setDamage(EntityDamageEvent.DamageModifier.ARMOR, 0);
+            }
         }
     }
 
@@ -206,6 +234,10 @@ public class DamageHandler implements Listener {
     public void processDamage(DamageMetadata dmg, org.bukkit.entity.Entity victimEntity, org.bukkit.entity.Entity attackerEntity, boolean isPlayerAttack, MobElementConfig mobConfig) {
         if (!(attackerEntity instanceof LivingEntity attacker) || !(victimEntity instanceof LivingEntity victim)) return;
 
+        // Prevent the same DamageMetadata from being processed twice
+        // (can happen when a double-hit mechanic fires PlayerAttackEvent twice on the same DM object)
+        if (!processedMeta.add(dmg)) return;
+
         // Store original damage BEFORE any modifiers
         double originalDamage = dmg.getPackets().stream()
             .mapToDouble(DamagePacket::getFinalValue)
@@ -292,6 +324,7 @@ public class DamageHandler implements Listener {
                 defenseBaseDamage,
                 plugin.getDamageConfig(),
                 applyPvpDefense,
+                activeTypes,
                 report
             );
         }
@@ -322,6 +355,14 @@ public class DamageHandler implements Listener {
         boolean originallyHadElements = !elemRaw.isEmpty();
         double originalElementalTotal = elemRaw.values().stream().mapToDouble(Double::doubleValue).sum();
 
+        // Detect "element override" mode: pendingElements provided element data but no actual
+        // DM packet has element set (happens in PlayerAttackEvent flow where MythicLib's DM
+        // is pre-built without element). In this mode the carrier packet IS the elemental damage
+        // proxy — we must not zero it and must manually apply all element multipliers to it.
+        boolean isElemOverride = elemRawOverride != null
+            && !elemRaw.isEmpty()
+            && dmg.getPackets().stream().noneMatch(p -> p.getElement() != null);
+
         // Apply Element modifiers
         DamageModifierApplicator.ElementModifierResult elementResult = applicator.applyElementModifiers(elemRaw);
 
@@ -337,11 +378,28 @@ public class DamageHandler implements Listener {
             Bukkit.getPluginManager().callEvent(immunityEvent);
         }
 
-        // Recalculate elemRaw after element modifiers were applied
-        elemRaw = recalculateElementDamage(dmg);
+        if (isElemOverride) {
+            // Apply element multipliers into elemRaw (applyElementModifiers couldn't touch packets)
+            for (Map.Entry<Element, Double> entry : elemRaw.entrySet()) {
+                double mul = elementResult.multipliers().getOrDefault(entry.getKey(), 1.0);
+                entry.setValue(entry.getValue() * mul);
+            }
+            // Materialize the updated total into the carrier packet so the pipeline sees real values
+            double newElemTotal = elemRaw.values().stream().mapToDouble(Double::doubleValue).sum();
+            for (DamagePacket packet : dmg.getPackets()) {
+                if (packet.getElement() == null) {
+                    packet.setValue(newElemTotal);
+                    break;
+                }
+            }
+            // Do NOT recalculate from packets — they have no element set, recalc would return empty
+        } else {
+            // Standard path: recalculate elemRaw from (now-modified) packets
+            elemRaw = recalculateElementDamage(dmg);
+        }
 
         // Non-Elemental / Carrier packet handling
-        NonElementalContext nonElemCtx = processNonElementalDamage(dmg, elemRaw, originallyHadElements, originalElementalTotal);
+        NonElementalContext nonElemCtx = processNonElementalDamage(dmg, elemRaw, originallyHadElements, originalElementalTotal, isElemOverride);
 
         // Carrier bonus transfer
         if (report != null && nonElemCtx.carrierBonusTransferred > 0) {
@@ -355,16 +413,21 @@ public class DamageHandler implements Listener {
         fireCritEvents(attacker, victim, dmg, crits);
 
         // Apply elemental crit multipliers
-        applyElementalCrits(dmg, crits, elemRaw);
+        applyElementalCrits(dmg, crits, elemRaw, isElemOverride);
 
         // Apply non-elemental modifiers
         double nonElemMul = applicator.applyNoneElementModifier(nonElemCtx.damage, activeTypes);
 
-        // Apply pending LibReforge modifiers
+        // Apply pending LibReforge flat damage
         double nonElemDamage = applyPendingModifiers(dmg, nonElemCtx.damage, report);
 
-        // Apply non-elemental crit multiplier
-        applyNonElementalCrit(dmg, crits);
+        // Consume LR multiplier.
+        // Override mode: apply multiplicatively to carrier (= elemental damage proxy), return 0.
+        // Normal mode: apply to element-tagged packets, return extra for additive non-elem pool.
+        double lrBonus = consumeLrPowerBonus(dmg, isElemOverride, report);
+
+        // Apply non-elemental crit + LR bonus as a single additive power pool
+        applyNonElementalCrit(dmg, crits, lrBonus, isElemOverride, report);
 
         // Sound effects for critical hits
         playCritSound(crits, attacker);
@@ -634,7 +697,8 @@ public class DamageHandler implements Listener {
     private record NonElementalContext(double damage, boolean hasElementalDamage, double carrierBonusTransferred) {}
 
     private NonElementalContext processNonElementalDamage(DamageMetadata dmg, Map<Element, Double> elemRaw,
-                                                          boolean originallyHadElements, double originalElementalTotal) {
+                                                          boolean originallyHadElements, double originalElementalTotal,
+                                                          boolean isElemOverride) {
         double totalElemental = elemRaw.values().stream().mapToDouble(Double::doubleValue).sum();
         double packetsSum = dmg.getPackets().stream().mapToDouble(DamagePacket::getFinalValue).sum();
         double nonElemRaw = packetsSum - totalElemental;
@@ -647,8 +711,9 @@ public class DamageHandler implements Listener {
         boolean shouldIgnoreCarrier = plugin.getDamageConfig().isIgnoreCarrierOnElemental();
         boolean shouldTransfer = plugin.getDamageConfig().isTransferCarrierToElemental();
 
-        // When weapon has elemental damage and we should ignore carrier
-        if (hasElementalDamage && shouldIgnoreCarrier) {
+        // When weapon has elemental damage and we should ignore carrier.
+        // Skip for override mode: carrier IS the elemental damage proxy — must not zero it.
+        if (hasElementalDamage && shouldIgnoreCarrier && !isElemOverride) {
             // Transfer carrier packet damage to elemental packets if enabled
             // This preserves enchantment bonuses (Sharpness, Smite, etc.) that are in the carrier
             if (nonElemRaw > 0 && shouldTransfer) {
@@ -703,16 +768,30 @@ public class DamageHandler implements Listener {
     }
 
     private void applyElementalCrits(DamageMetadata dmg, DamageModifierApplicator.CritResult crits,
-                                     Map<Element, Double> elemRaw) {
+                                     Map<Element, Double> elemRaw, boolean isElemOverride) {
         crits.elementCritMults().forEach((el, mul) -> {
-            dmg.multiplicativeModifier(mul, el);
+            if (!isElemOverride) {
+                dmg.multiplicativeModifier(mul, el); // only works when native element packets exist
+            }
             elemRaw.computeIfPresent(el, (k, v) -> v * mul);
         });
+
+        // Override mode: elem crit multipliers were applied to elemRaw map above;
+        // sync the carrier packet to the updated total.
+        if (isElemOverride && !crits.elementCritMults().isEmpty()) {
+            double newTotal = elemRaw.values().stream().mapToDouble(Double::doubleValue).sum();
+            for (DamagePacket packet : dmg.getPackets()) {
+                if (packet.getElement() == null) {
+                    packet.setValue(newTotal);
+                    break;
+                }
+            }
+        }
     }
 
     private double applyPendingModifiers(DamageMetadata dmg, double nonElemDamage, DebugReport report) {
         nonElemDamage = applyPendingFlatDamage(dmg, nonElemDamage, report);
-        applyPendingMultiplier(dmg, report);
+        // LR multiplier is consumed separately via consumeLrPowerBonus() after this call
         return nonElemDamage;
     }
 
@@ -744,41 +823,68 @@ public class DamageHandler implements Listener {
         return nonElemDamage;
     }
 
-    private void applyPendingMultiplier(DamageMetadata dmg, DebugReport report) {
+    /**
+     * Consumes the pending LibReforge multiplier.
+     *
+     * Override mode (carrier = elemental proxy): apply multiplicatively to the carrier packet.
+     * Normal elemental mode: apply multiplicatively to element-tagged packets.
+     * Non-elemental mode: return extra (pendingMul - 1) to pool additively with crit.
+     */
+    private double consumeLrPowerBonus(DamageMetadata dmg, boolean isElemOverride, DebugReport report) {
         Double pendingMul = pendingMultiplier.get();
-        if (pendingMul == null || Math.abs(pendingMul - 1.0) <= 1e-6) {
-            return;
-        }
+        if (pendingMul == null || Math.abs(pendingMul - 1.0) <= 1e-6) return 0.0;
 
         pendingMultiplier.remove();
 
-        if (Math.abs(pendingMul) < 1e-6) {
+        if (isElemOverride) {
+            // Carrier represents elemental damage — apply LR multiplier directly to it
             for (DamagePacket packet : dmg.getPackets()) {
-                packet.setValue(0);
+                if (packet.getElement() == null) {
+                    packet.setValue(packet.getValue() * pendingMul);
+                    break;
+                }
             }
-        } else {
-            for (DamagePacket packet : dmg.getPackets()) {
+            if (report != null) {
+                report.setLrPowerBonus(pendingMul - 1.0, pendingMul);
+            }
+            return 0.0; // no additive pool for elemental override hits
+        }
+
+        // Apply multiplicatively to element-tagged packets
+        for (DamagePacket packet : dmg.getPackets()) {
+            if (packet.getElement() != null) {
                 packet.setValue(packet.getValue() * pendingMul);
             }
         }
 
-        if (report != null) {
-            report.addPendingModifier("LibReforge Multiplier", "×" + DamageDebug.fmt(pendingMul));
-        }
+        return pendingMul - 1.0; // extra pooled additively with non-elemental crit
     }
 
-    private void applyNonElementalCrit(DamageMetadata dmg, DamageModifierApplicator.CritResult crits) {
-        if (crits.nonElemCritMul() <= 1.0) return;
+    /**
+     * Applies the non-elemental power pool: crit bonus + LibReforge bonus combined additively.
+     * Instead of base × crit × LR, it computes base × (1 + critExtra + lrExtra).
+     * Skipped in override mode (carrier = elemental damage; elem crit already applied there).
+     */
+    private void applyNonElementalCrit(DamageMetadata dmg, DamageModifierApplicator.CritResult crits,
+                                       double lrBonus, boolean isElemOverride, DebugReport report) {
+        if (isElemOverride) return;
+        double critExtra = crits.nonElemCritMul() - 1.0;
+        double combined  = 1.0 + critExtra + lrBonus;
+        if (combined <= 1.001) return;
 
         for (DamagePacket packet : dmg.getPackets()) {
             if (packet.getElement() == null && packet.getFinalValue() > 0) {
                 if (!packet.getTypes().isEmpty()) {
-                    dmg.multiplicativeModifier(crits.nonElemCritMul(), packet.getTypes().iterator().next());
+                    dmg.multiplicativeModifier(combined, packet.getTypes().iterator().next());
                 } else {
-                    dmg.multiplicativeModifier(crits.nonElemCritMul(), DamageType.PHYSICAL);
+                    dmg.multiplicativeModifier(combined, DamageType.PHYSICAL);
                 }
                 break;
             }
+        }
+
+        if (report != null && lrBonus > 1e-6) {
+            report.setLrPowerBonus(lrBonus, combined);
         }
     }
 

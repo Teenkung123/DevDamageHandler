@@ -45,6 +45,8 @@ public class DebugReport {
     // ── §5 Crits ──
     private final List<CritEntry> critResults = new ArrayList<>();
     private StackedCritEntry stackedCrit;
+    private double lrPowerBonus = 0.0;   // pendingMul - 1, pooled additively with crit
+    private double lrPooledFinalMul = 0.0;
 
     // ── §6 Defense ──
     private DefenseEntry defenseEntry;
@@ -118,6 +120,11 @@ public class DebugReport {
         this.stackedCrit = new StackedCritEntry(totalPower, finalMul);
     }
 
+    public void setLrPowerBonus(double extra, double combinedMul) {
+        this.lrPowerBonus = extra;
+        this.lrPooledFinalMul = combinedMul;
+    }
+
     public void setPlayerDefense(PlayerDefenseApplicator.DefenseStats stats,
                                  PlayerDefenseApplicator.MultiplierResult multipliers,
                                  double baseDmg, double finalDmg) {
@@ -154,22 +161,17 @@ public class DebugReport {
 
     // ── §1 CONTEXT ──
     private void renderHeader(StringBuilder sb) {
-        sb.append("<gray>╔══════════════════════════════════════╗</gray>\n");
-        sb.append("<gray>║</gray>         <gold>DDH DAMAGE REPORT</gold>            <gray>║</gray>\n");
-        sb.append("<gray>╚══════════════════════════════════════╝</gray>\n");
-        sb.append("\n");
-        sb.append("<gray>── <yellow>#1 CONTEXT</yellow> ──────────────────────────</gray>\n");
-        sb.append("  <yellow>Attacker:</yellow> <white>").append(safe(attackerName)).append("</white>");
-        if (attackerType != null) sb.append(" <dark_gray>(").append(attackerType).append(")</dark_gray>");
-        sb.append("\n");
-        sb.append("  <yellow>Target:</yellow>   <white>").append(safe(targetName)).append("</white>");
-        if (targetType != null) sb.append(" <dark_gray>(").append(targetType).append(")</dark_gray>");
+        sb.append("<gold>■ DDH DAMAGE REPORT</gold>\n");
+        sb.append("  <yellow>Atk:</yellow> <white>").append(safe(attackerName)).append("</white>");
+        if (attackerType != null) sb.append("<dark_gray>(").append(attackerType).append(")</dark_gray>");
+        sb.append("  <yellow>Tgt:</yellow> <white>").append(safe(targetName)).append("</white>");
+        if (targetType != null) sb.append("<dark_gray>(").append(targetType).append(")</dark_gray>");
         sb.append("\n");
     }
 
     // ── §2 RAW DAMAGE ──
     private void renderRawDamage(StringBuilder sb) {
-        sb.append("\n<gray>── <yellow>#2 RAW DAMAGE</yellow> ───────────────────────</gray>\n");
+        sb.append("\n<gray>▸</gray> <yellow>#2 RAW DAMAGE</yellow>\n");
         sb.append("  <yellow>Base Damage:</yellow> <white>").append(fmt(rawDamageTotal)).append("</white>\n");
         if (!rawPackets.isEmpty()) {
             sb.append("  <yellow>Packets:</yellow>\n");
@@ -184,9 +186,9 @@ public class DebugReport {
 
     // ── §3 ATTACKER STATS ──
     private void renderAttackerStats(StringBuilder sb) {
-        sb.append("\n<gray>── <yellow>#3 ATTACKER STATS</yellow> ───────────────────</gray>\n");
+        sb.append("\n<gray>▸</gray> <yellow>#3 ATTACKER STATS</yellow>\n");
         if (attackerStats.isEmpty()) {
-            sb.append("  <dark_gray>(no relevant stats)</dark_gray>\n");
+            sb.append("  <dark_gray>(none)</dark_gray>\n");
         } else {
             for (StatEntry stat : attackerStats) {
                 sb.append("  <yellow>").append(stat.label).append(":</yellow> <white>").append(stat.value).append("</white>\n");
@@ -196,7 +198,7 @@ public class DebugReport {
 
     // ── §4 MODIFIERS ──
     private void renderModifiers(StringBuilder sb) {
-        sb.append("\n<gray>── <yellow>#4 MODIFIERS</yellow> ────────────────────────</gray>\n");
+        sb.append("\n<gray>▸</gray> <yellow>#4 MODIFIERS</yellow>\n");
 
         // Type multipliers
         if (!typeModifiers.isEmpty()) {
@@ -285,24 +287,44 @@ public class DebugReport {
 
     // ── §5 CRITS ──
     private void renderCrits(StringBuilder sb) {
-        sb.append("\n<gray>── <yellow>#5 CRITS</yellow> ────────────────────────────</gray>\n");
-        if (critResults.isEmpty()) {
-            sb.append("  <dark_gray>(no crits triggered)</dark_gray>\n");
-        } else {
-            for (CritEntry c : critResults) {
-                sb.append("  <gold>").append(c.symbol).append(" ").append(c.type).append(" CRIT!</gold> <gray>+</gray><white>")
-                  .append(fmt(c.power)).append("% power</white>\n");
-            }
-            if (stackedCrit != null) {
-                sb.append("  <aqua>⚡ STACKED!</aqua> <white>Total: ").append(fmt(stackedCrit.totalPower))
-                  .append("% = ×").append(fmt(stackedCrit.finalMul)).append("</white>\n");
-            }
+        sb.append("\n<gray>▸</gray> <yellow>#5 CRITS</yellow>\n");
+
+        boolean hasCrit = !critResults.isEmpty();
+        boolean hasLr   = lrPowerBonus > 1e-6;
+
+        if (!hasCrit && !hasLr) {
+            sb.append("  <dark_gray>(none)</dark_gray>\n");
+            return;
+        }
+
+        for (CritEntry c : critResults) {
+            sb.append("  <gold>").append(c.symbol).append(" ").append(c.type).append(" CRIT!</gold> <gray>+</gray><white>")
+              .append(fmt(c.power)).append("% power</white>\n");
+        }
+
+        if (hasLr) {
+            sb.append("  <aqua>⬆ LibReforge:</aqua> <white>+").append(fmt(lrPowerBonus * 100)).append("% power</white>\n");
+        }
+
+        if (hasCrit && hasLr) {
+            // Both present — show the additive pool total
+            double critPct  = critResults.stream().mapToDouble(c -> c.power).sum();
+            double totalPct = critPct + lrPowerBonus * 100.0;
+            sb.append("  <aqua>⚡ POOLED</aqua> <white>+").append(fmt(totalPct))
+              .append("% = ×").append(fmt(lrPooledFinalMul)).append("</white>\n");
+        } else if (hasCrit && stackedCrit != null) {
+            // Multiple crit types, no LR bonus
+            sb.append("  <aqua>⚡ STACKED!</aqua> <white>Total: ").append(fmt(stackedCrit.totalPower))
+              .append("% = ×").append(fmt(stackedCrit.finalMul)).append("</white>\n");
+        } else if (!hasCrit && hasLr) {
+            // Only LR, no crit — show its effective multiplier
+            sb.append("  <dark_gray>→ ×").append(fmt(1.0 + lrPowerBonus)).append("</dark_gray>\n");
         }
     }
 
     // ── §6 DEFENSE ──
     private void renderDefense(StringBuilder sb) {
-        sb.append("\n<gray>── <yellow>#6 DEFENSE</yellow> ──────────────────────────</gray>\n");
+        sb.append("\n<gray>▸</gray> <yellow>#6 DEFENSE</yellow>\n");
 
         boolean hasDefenseInfo = false;
 
@@ -345,6 +367,16 @@ public class DebugReport {
                 sb.append(" <white>").append(stats.typeId()).append(":").append(fmt(stats.typeReduction())).append("%</white>");
                 hasRed = true;
             }
+            if (stats.armorEnchantReduction() > 0.001) {
+                sb.append(" <white>Armor Prot:").append(fmt(stats.armorEnchantReduction())).append("%</white>");
+                hasRed = true;
+            }
+            if (stats.vanillaArmorMultiplier() < 1.0 - 0.001) {
+                double armorReductionPct = (1.0 - stats.vanillaArmorMultiplier()) * 100;
+                sb.append(" <white>Armor:").append(fmt(armorReductionPct)).append("%(×")
+                  .append(fmt(stats.vanillaArmorMultiplier())).append(")</white>");
+                hasRed = true;
+            }
             if (!hasRed) sb.append(" <gray>none</gray>");
             sb.append(" <gray>→ mul:</gray> <aqua>").append(fmt(muls.reduction() * 100)).append("%</aqua>\n");
 
@@ -376,7 +408,7 @@ public class DebugReport {
 
     // ── §7 FINAL RESULT ──
     private void renderFinalResult(StringBuilder sb) {
-        sb.append("\n<gray>── <yellow>#7 FINAL RESULT</yellow> ─────────────────────</gray>\n");
+        sb.append("\n<gray>▸</gray> <yellow>#7 FINAL RESULT</yellow>\n");
         if (!finalPackets.isEmpty()) {
             sb.append("  <yellow>Final Packets:</yellow>\n");
             for (int i = 0; i < finalPackets.size(); i++) {
@@ -391,8 +423,7 @@ public class DebugReport {
                 sb.append("\n");
             }
         }
-        sb.append("  <gray>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</gray>\n");
-        sb.append("  <yellow>Total Damage:</yellow> <green>").append(fmt(finalDamageTotal)).append("</green>\n");
+        sb.append("  <yellow>Total:</yellow> <green>").append(fmt(finalDamageTotal)).append("</green>\n");
 
         // Indicator lines
         if (!indicatorLines.isEmpty()) {
@@ -413,7 +444,7 @@ public class DebugReport {
         DamageConfig config = plugin.getDamageConfig();
         if (config == null) return;
 
-        sb.append("\n<gray>── Config ──────────────────────────────</gray>\n");
+        sb.append("\n<gray>▸</gray> <yellow>Config</yellow>\n");
         sb.append("  <yellow>Formula:</yellow> <white>").append(config.getFlatDefenseType().name()).append("</white> <dark_gray>(");
         switch (config.getFlatDefenseType()) {
             case DIMINISHING -> sb.append("dmg × (1 - def/(def+").append(fmt(config.getFlatDefenseBase())).append("))");

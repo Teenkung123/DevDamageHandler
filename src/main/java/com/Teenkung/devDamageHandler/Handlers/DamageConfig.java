@@ -35,6 +35,10 @@ public class DamageConfig {
     private final boolean ignoreCarrierOnElemental;
     private final boolean transferCarrierToElemental;
 
+    // Vanilla integration settings
+    private final boolean vanillaArmorEnchantmentsEnabled;
+    private final boolean vanillaArmorPointsEnabled;
+
     // Flat defense formula settings
     private final FormulaType flatDefenseType;
     private final double flatDefenseBase;
@@ -79,6 +83,11 @@ public class DamageConfig {
         ConfigurationSection elemSec = root != null ? root.getConfigurationSection("elements") : null;
         this.showImmuneIndicator = elemSec == null || elemSec.getBoolean("show-immune-indicator", true);
         this.immunityNegatesElement = elemSec == null || elemSec.getBoolean("immunity-negates-element", true);
+
+        // Vanilla integration
+        ConfigurationSection vanillaSec = root != null ? root.getConfigurationSection("vanilla-integration") : null;
+        this.vanillaArmorEnchantmentsEnabled = vanillaSec == null || vanillaSec.getBoolean("armor-enchantments", true);
+        this.vanillaArmorPointsEnabled = vanillaSec == null || vanillaSec.getBoolean("armor-points", true);
     }
     
     private FormulaType parseFormulaType(String type) {
@@ -101,6 +110,8 @@ public class DamageConfig {
         this.weaknessCap = 200;
         this.showImmuneIndicator = true;
         this.immunityNegatesElement = true;
+        this.vanillaArmorEnchantmentsEnabled = true;
+        this.vanillaArmorPointsEnabled = true;
     }
     
     // Getters
@@ -142,6 +153,14 @@ public class DamageConfig {
     
     public boolean isImmunityNegatesElement() {
         return immunityNegatesElement;
+    }
+
+    public boolean isVanillaArmorEnchantmentsEnabled() {
+        return vanillaArmorEnchantmentsEnabled;
+    }
+
+    public boolean isVanillaArmorPointsEnabled() {
+        return vanillaArmorPointsEnabled;
     }
     
     /**
